@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader, Home } from 'lucide-react';
 
 export default function AdminDashboard() {
     const [activeTab, setActiveTab] = useState('sellers');
@@ -303,6 +304,24 @@ export default function AdminDashboard() {
                         <h3 style={{ fontSize: '1.5rem', margin: 0 }}>Admin Panel</h3>
                     </div>
                     <nav className="flex flex-col gap-2">
+                        <Link
+                            to="/"
+                            className="btn btn-secondary"
+                            style={{
+                                width: '100%',
+                                justifyContent: 'flex-start',
+                                textTransform: 'capitalize',
+                                padding: '1rem',
+                                fontSize: '1rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                marginBottom: '0.5rem'
+                            }}
+                        >
+                            <Home size={20} />
+                            Home
+                        </Link>
                         <button
                             className={`btn ${activeTab === 'sellers' ? 'btn-primary' : 'btn-secondary'}`}
                             style={{

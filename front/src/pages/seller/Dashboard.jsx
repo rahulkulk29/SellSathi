@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, DollarSign, Plus, Edit2, Trash2, Truck, Loader, X } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, DollarSign, Plus, Edit2, Trash2, Truck, Loader, X, Home } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { auth } from '../../config/firebase';
 
 export default function SellerDashboard() {
@@ -118,6 +119,24 @@ export default function SellerDashboard() {
                 <div>
                     <h3 style={{ marginBottom: '2rem', fontSize: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>Seller Portal</h3>
                     <nav className="flex flex-col gap-2">
+                        <Link
+                            to="/"
+                            className="btn btn-secondary"
+                            style={{
+                                width: '100%',
+                                justifyContent: 'flex-start',
+                                textTransform: 'capitalize',
+                                padding: '1rem',
+                                fontSize: '1rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                marginBottom: '0.5rem'
+                            }}
+                        >
+                            <Home size={20} />
+                            Home
+                        </Link>
                         {['overview', 'products', 'orders'].map(tab => (
                             <button
                                 key={tab}
