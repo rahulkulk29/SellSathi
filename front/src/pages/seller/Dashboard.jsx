@@ -103,6 +103,26 @@ export default function SellerDashboard() {
         }
     };
 
+    const handleUpdateStatus = async (orderId, currentStatus) => {
+        const statuses = ['Pending', 'Processing', 'Shipped', 'Delivered', 'Cancelled'];
+        const nextIndex = (statuses.indexOf(currentStatus) + 1) % statuses.length;
+        const newStatus = statuses[nextIndex];
+
+        try {
+            const response = await fetch(`http://localhost:5000/seller/order/${orderId}/status`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: newStatus })
+            });
+            const data = await response.json();
+            if (data.success) {
+                setOrders(orders.map(o => o.id === orderId ? { ...o, status: newStatus } : o));
+            }
+        } catch (error) {
+            console.error("Error updating status:", error);
+        }
+    };
+
     const statCards = [
         { label: 'Total Sales', value: `₹${stats.totalSales.toLocaleString()}`, icon: <DollarSign />, color: 'var(--success)' },
         { label: 'Active Products', value: stats.totalProducts, icon: <Package />, color: 'var(--primary)' },
@@ -216,10 +236,7 @@ export default function SellerDashboard() {
                                 <div className="flex flex-col items-center justify-center p-12 text-center h-full">
                                     <Package size={64} className="text-muted mb-4" />
                                     <h3>No Products Yet</h3>
-                                    <p className="text-muted mb-4">Start selling by adding your first product.</p>
-                                    <button className="btn btn-primary" onClick={() => setShowAddModal(true)}>
-                                        <Plus size={18} /> Add Product
-                                    </button>
+                                    <p className="text-muted mb-4">Start selling by adding your first product using the button above.</p>
                                 </div>
                             ) : (
                                 <div style={{ overflowX: 'auto', flex: 1 }}>
@@ -339,7 +356,10 @@ export default function SellerDashboard() {
                                                         </span>
                                                     </td>
                                                     <td style={{ padding: '1.25rem' }}>
-                                                        <button className="btn btn-secondary btn-sm flex items-center gap-2">
+                                                        <button
+                                                            onClick={() => handleUpdateStatus(o.id, o.status)}
+                                                            className="btn btn-secondary btn-sm flex items-center gap-2"
+                                                        >
                                                             Update Status
                                                         </button>
                                                     </td>
@@ -370,47 +390,47 @@ export default function SellerDashboard() {
                                 <X size={24} />
                             </button>
                         </div>
-                        <form onSubmit={handleAddProduct} className="flex flex-col gap-5">
+                        <form onSubmit={handleAddProduct} className="flex flex-col gap-6">
                             <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Product Title</label>
+                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Title</label>
                                 <input
-                                    type="text" placeholder="e.g. Handmade Silk Saree" required
+                                    type="text" placeholder="e.g. Traditional Hand-Woven Pashmina Shawl" required
                                     className="input-field"
-                                    style={{ width: '100%', padding: '0.75rem' }}
+                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
                                     value={newProduct.title} onChange={e => setNewProduct({ ...newProduct, title: e.target.value })}
                                 />
                             </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
                                 <div className="form-group">
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Price (₹)</label>
+                                    <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Price (₹)</label>
                                     <div className="relative">
-                                        <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--muted)' }}>₹</span>
+                                        <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: 'var(--primary)' }}>₹</span>
                                         <input
                                             type="number" placeholder="0.00" required
                                             className="input-field"
-                                            style={{ width: '100%', padding: '0.75rem 0.75rem 0.75rem 2.5rem' }}
+                                            style={{ width: '100%', padding: '1rem 1rem 1rem 2.5rem', borderRadius: '12px' }}
                                             value={newProduct.price} onChange={e => setNewProduct({ ...newProduct, price: e.target.value })}
                                         />
                                     </div>
                                 </div>
                                 <div className="form-group">
-                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Stock Quantity</label>
+                                    <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Stock Status</label>
                                     <input
-                                        type="number" placeholder="Available units" required
+                                        type="number" placeholder="Units available" required
                                         className="input-field"
-                                        style={{ width: '100%', padding: '0.75rem' }}
+                                        style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
                                         value={newProduct.stock} onChange={e => setNewProduct({ ...newProduct, stock: e.target.value })}
                                     />
                                 </div>
                             </div>
 
                             <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Category</label>
+                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Category</label>
                                 <select
                                     required
                                     className="input-field"
-                                    style={{ width: '100%', padding: '0.75rem' }}
+                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
                                     value={newProduct.category} onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
                                 >
                                     <option value="">Select Category</option>
@@ -424,27 +444,49 @@ export default function SellerDashboard() {
                             </div>
 
                             <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Image URL</label>
-                                <input
-                                    type="text" placeholder="https://example.com/image.jpg"
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '0.75rem' }}
-                                    value={newProduct.image} onChange={e => setNewProduct({ ...newProduct, image: e.target.value })}
-                                />
+                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Image</label>
+                                <div style={{
+                                    border: '2px dashed var(--border)',
+                                    borderRadius: '12px',
+                                    padding: '1.5rem',
+                                    textAlign: 'center',
+                                    background: 'var(--surface)',
+                                    marginBottom: '1rem'
+                                }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Paste image URL here..."
+                                        className="input-field"
+                                        style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem' }}
+                                        value={newProduct.image}
+                                        onChange={e => setNewProduct({ ...newProduct, image: e.target.value })}
+                                    />
+                                    <p className="text-muted" style={{ fontSize: '0.8rem' }}>Please provide a high-quality URL for your product image.</p>
+                                </div>
                                 {newProduct.image && (
-                                    <div style={{ marginTop: '0.5rem', height: '150px', borderRadius: '8px', overflow: 'hidden', border: '1px solid var(--border)' }}>
+                                    <div style={{ position: 'relative', height: '200px', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
                                         <img src={newProduct.image} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                                             onError={(e) => { e.target.src = 'https://via.placeholder.com/400x200?text=Invalid+Image+URL'; }} />
+                                        <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
+                                            <button
+                                                type="button"
+                                                className="btn btn-secondary icon-btn"
+                                                style={{ background: 'white', color: 'var(--danger)' }}
+                                                onClick={() => setNewProduct({ ...newProduct, image: '' })}
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
                                     </div>
                                 )}
                             </div>
 
                             <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 500 }}>Description</label>
+                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Description</label>
                                 <textarea
-                                    placeholder="Describe your product in detail..." rows="4"
+                                    placeholder="Tell customers about your product's craft, material, and uniqueness..." rows="5"
                                     className="input-field"
-                                    style={{ width: '100%', padding: '0.75rem' }}
+                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
                                     value={newProduct.description} onChange={e => setNewProduct({ ...newProduct, description: e.target.value })}
                                 ></textarea>
                             </div>

@@ -1,28 +1,53 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import SellerAuthModal from '../common/SellerAuthModal';
 
 export default function Footer() {
     const [isSellerModalOpen, setIsSellerModalOpen] = useState(false);
+    const [user, setUser] = useState(null);
+
+    // Check localStorage on mount and listen for changes
+    useEffect(() => {
+        const checkUser = () => {
+            const userData = localStorage.getItem('user');
+            if (userData) {
+                try {
+                    setUser(JSON.parse(userData));
+                } catch (error) {
+                    console.error('Error parsing user data in footer:', error);
+                    setUser(null);
+                }
+            } else {
+                setUser(null);
+            }
+        };
+
+        checkUser();
+
+        const handleUserChange = () => {
+            checkUser();
+        };
+
+        window.addEventListener('userDataChanged', handleUserChange);
+        return () => {
+            window.removeEventListener('userDataChanged', handleUserChange);
+        };
+    }, []);
 
     const handleBecomeSellerClick = () => {
-        // Check if user is logged in
-        const user = localStorage.getItem('user');
         if (!user) {
             alert('Please login as a customer first before becoming a seller');
             return;
         }
 
-        const userData = JSON.parse(user);
-
         // Check if user is already a seller
-        if (userData.role === 'SELLER') {
+        if (user.role === 'SELLER') {
             alert('You are already registered as a seller');
             return;
         }
 
         // Check if user is admin
-        if (userData.role === 'ADMIN') {
+        if (user.role === 'ADMIN') {
             alert('Admin cannot become a seller');
             return;
         }
@@ -33,6 +58,7 @@ export default function Footer() {
 
     const handleSellerSuccess = () => {
         setIsSellerModalOpen(false);
+        // Refresh user data is handled by the event listener
     };
 
     return (
@@ -67,8 +93,7 @@ export default function Footer() {
                         </ul>
                     </div>
 
-                    <div style={{ textAlign: 'right' }}>
-                        <h4>Earn with Us</h4>
+                    {user?.role !== 'SELLER' && (
                         <div style={{ marginTop: '1rem' }}>
                             <button
                                 onClick={handleBecomeSellerClick}
@@ -79,7 +104,7 @@ export default function Footer() {
                             </button>
                             <p className="text-muted" style={{ marginTop: '0.5rem' }}>Open your shop in minutes.</p>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 <div style={{ marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid var(--border)', textAlign: 'center' }}>

@@ -26,18 +26,18 @@ export default function Home() {
             await seedProducts(); // Run once to ensure data exists
 
             try {
-                const querySnapshot = await getDocs(collection(db, "products"));
-                const productsData = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
+                const response = await fetch('http://localhost:5000/marketplace/products');
+                const data = await response.json();
 
-                setProducts(productsData);
-                setFilteredProducts(productsData);
+                if (data.success) {
+                    const finalProducts = data.products;
+                    setProducts(finalProducts);
+                    setFilteredProducts(finalProducts);
 
-                // Extract unique categories
-                const uniqueCategories = ['All', ...new Set(productsData.map(p => p.category))];
-                setCategories(uniqueCategories);
+                    // Extract unique categories
+                    const uniqueCategories = ['All', ...new Set(finalProducts.map(p => p.category))];
+                    setCategories(uniqueCategories);
+                }
 
                 setLoading(false);
             } catch (error) {

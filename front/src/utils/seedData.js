@@ -108,18 +108,23 @@ const products = [
 export const seedProducts = async () => {
     try {
         const querySnapshot = await getDocs(collection(db, "products"));
-        if (querySnapshot.size === 0) {
-            console.log("Seeding products...");
-            const promises = products.map(product =>
-                setDoc(doc(db, "products", product.id), product)
+        const existingIds = new Set(querySnapshot.docs.map(doc => doc.id));
+
+        const missingProducts = products.filter(p => !existingIds.has(p.id));
+
+        if (missingProducts.length > 0) {
+            console.log(`Seeding ${missingProducts.length} missing products...`);
+            const promises = missingProducts.map(product =>
+                setDoc(doc(db, "products", product.id), {
+                    ...product,
+                    createdAt: new Date()
+                })
             );
             await Promise.all(promises);
-            console.log("Products seeded successfully!");
-            return true;
-        } else {
-            console.log("Products already exist, skipping seed.");
-            return false;
+            console.log("Missing products seeded successfully!");
         }
+
+        return true;
     } catch (error) {
         console.error("Error seeding products:", error);
         return false;

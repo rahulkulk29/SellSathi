@@ -21,6 +21,43 @@ const TEST_CREDENTIALS = {
     // Add more test numbers here as needed
 };
 
+// Endpoint for marketplace products (combines products and listedproduct)
+app.get("/marketplace/products", async (req, res) => {
+    console.log("Fetching marketplace products...");
+    try {
+        // Remove orderBy because documents without createdAt are omitted by Firestore
+        const productsSnap = await db.collection("products").get();
+
+        const products = productsSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            name: doc.data().title || doc.data().name,
+            imageUrl: doc.data().image || doc.data().imageUrl,
+            price: Number(doc.data().price) // Ensure price is a number
+        }));
+
+        // Sort in memory to include products without timestamps
+        const sortedProducts = products.sort((a, b) => {
+            const getTime = (val) => {
+                if (!val) return 0;
+                if (val.toDate) return val.toDate().getTime(); // Firestore Timestamp
+                if (val instanceof Date) return val.getTime(); // JS Date
+                if (typeof val === 'number') return val; // Raw number/timestamp
+                return new Date(val).getTime(); // Try to parse anything else
+            };
+            return getTime(b.createdAt) - getTime(a.createdAt);
+        });
+
+        return res.status(200).json({
+            success: true,
+            products: sortedProducts
+        });
+    } catch (error) {
+        console.error("MARKETPLACE PRODUCTS ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch products" });
+    }
+});
+
 app.post("/auth/login", async (req, res) => {
     try {
         const { idToken } = req.body;
@@ -437,13 +474,23 @@ app.get("/admin/products", async (req, res) => {
         const products = [];
         for (const doc of productsSnap.docs) {
             const productData = doc.data();
-            const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
-            const sellerData = sellerSnap.data();
+            let sellerPhone = "System/Seeded";
+
+            if (productData.sellerId) {
+                try {
+                    const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
+                    if (sellerSnap.exists) {
+                        sellerPhone = sellerSnap.data()?.phone || "Unknown";
+                    }
+                } catch (e) {
+                    console.warn(`Could not fetch seller for product ${doc.id}`);
+                }
+            }
 
             products.push({
                 id: doc.id,
-                title: productData.title,
-                seller: sellerData?.phone || "Unknown",
+                title: productData.title || productData.name,
+                seller: sellerPhone,
                 price: productData.price,
                 category: productData.category,
                 status: productData.status || "Active"
@@ -605,7 +652,7 @@ app.get("/seller/:uid/stats", async (req, res) => {
 app.get("/seller/:uid/products", async (req, res) => {
     try {
         const { uid } = req.params;
-        const productsSnap = await db.collection("products").where("sellerId", "==", uid).get();
+        const productsSnap = await db.collection("sellers").doc(uid).collection("listedproducts").get();
 
         const products = [];
         productsSnap.forEach(doc => {
@@ -638,15 +685,22 @@ app.post("/seller/product/add", async (req, res) => {
             ...productData,
             sellerId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            status: "Active" // Default status
+            status: "Active"
         };
 
-        const docRef = await db.collection("products").add(newProduct);
+        // 1. Save to main products collection
+        const mainDocRef = await db.collection("products").add(newProduct);
+
+        // 2. Save to seller's listedproducts subcollection using the same ID or reference
+        await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(mainDocRef.id).set({
+            ...newProduct,
+            mainProductId: mainDocRef.id
+        });
 
         return res.status(200).json({
             success: true,
-            message: "Product added successfully",
-            productId: docRef.id
+            message: "Product listed successfully in both collections",
+            productId: mainDocRef.id
         });
     } catch (error) {
         console.error("ADD PRODUCT ERROR:", error);
@@ -661,11 +715,26 @@ app.post("/seller/product/add", async (req, res) => {
 app.delete("/seller/product/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        await db.collection("products").doc(id).delete();
+
+        // 1. Get product to find sellerId
+        const productRef = db.collection("products").doc(id);
+        const productSnap = await productRef.get();
+
+        if (productSnap.exists) {
+            const { sellerId } = productSnap.data();
+
+            // 2. Delete from seller's subcollection
+            if (sellerId) {
+                await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).delete();
+            }
+
+            // 3. Delete from main collection
+            await productRef.delete();
+        }
 
         return res.status(200).json({
             success: true,
-            message: "Product deleted successfully"
+            message: "Product deleted from all collections"
         });
     } catch (error) {
         console.error("DELETE PRODUCT ERROR:", error);
@@ -710,6 +779,30 @@ app.get("/seller/:uid/orders", async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to fetch orders"
+        });
+    }
+});
+
+// PUT /seller/order/:id/status - Update order status
+app.put("/seller/order/:id/status", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        await db.collection("orders").doc(id).update({
+            status,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Order status updated successfully"
+        });
+    } catch (error) {
+        console.error("UPDATE ORDER STATUS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update order status"
         });
     }
 });
