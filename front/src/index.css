@@ -275,3 +275,160 @@ h4 {
   background: var(--border);
   border-radius: 2px;
 }
+
+/* ========================================
+   RESPONSIVE DESIGN - MEDIA QUERIES
+   ======================================== */
+
+/* Mobile First - Base styles above are for mobile */
+
+/* Small devices (landscape phones, 576px and up) */
+@media (max-width: 576px) {
+  .container {
+    padding: 0 1rem;
+  }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  h3 {
+    font-size: 1.25rem;
+  }
+
+  .btn {
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+  }
+
+  .glass-card {
+    padding: 1rem;
+  }
+}
+
+/* Medium devices (tablets, 768px and up) */
+@media (max-width: 768px) {
+  .container {
+    max-width: 100%;
+    padding: 0 1.25rem;
+  }
+
+  /* Hide desktop-only elements */
+  .desktop-only {
+    display: none !important;
+  }
+
+  /* Show mobile-only elements */
+  .mobile-only {
+    display: block !important;
+  }
+
+  /* Stack flex items on mobile */
+  .flex-mobile-col {
+    flex-direction: column;
+  }
+
+  /* Full width on mobile */
+  .mobile-full-width {
+    width: 100% !important;
+  }
+
+  /* Adjust gaps for mobile */
+  .gap-8 {
+    gap: 1rem;
+  }
+
+  .gap-4 {
+    gap: 0.75rem;
+  }
+}
+
+/* Large devices (desktops, 992px and up) */
+@media (min-width: 992px) {
+  .container {
+    max-width: 960px;
+  }
+}
+
+/* Extra large devices (large desktops, 1200px and up) */
+@media (min-width: 1200px) {
+  .container {
+    max-width: 1140px;
+  }
+}
+
+/* Extra extra large devices (1400px and up) */
+@media (min-width: 1400px) {
+  .container {
+    max-width: 1320px;
+  }
+}
+
+/* Utility classes for responsive design */
+.mobile-only {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
+@media (max-width: 768px) {
+  .mobile-only {
+    display: block;
+  }
+
+  .desktop-only {
+    display: none;
+  }
+
+  /* Navbar adjustments */
+  nav.glass-card {
+    margin: 0.5rem !important;
+    padding: 0.75rem 1rem !important;
+  }
+
+  /* Container padding */
+  .container {
+    padding-left: 1rem !important;
+    padding-right: 1rem !important;
+  }
+
+  /* Headings */
+  h1 {
+    font-size: 1.75rem !important;
+  }
+
+  h2 {
+    font-size: 1.5rem !important;
+  }
+
+  h3 {
+    font-size: 1.25rem !important;
+  }
+
+  /* Buttons */
+  .btn {
+    padding: 0.625rem 1rem;
+    font-size: 0.9rem;
+  }
+
+  /* Cards */
+  .glass-card {
+    padding: 1.25rem !important;
+  }
+
+  /* Grid adjustments */
+  [style*="gridTemplateColumns"] {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* Flex to column on mobile */
+  .flex-mobile-col {
+    flex-direction: column !important;
+  }
+}

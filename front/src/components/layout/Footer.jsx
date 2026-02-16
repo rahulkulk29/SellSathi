@@ -64,51 +64,61 @@ export default function Footer() {
     return (
         <footer style={{
             marginTop: '4rem',
-            padding: '4rem 0',
+            padding: '3rem 0',
             borderTop: '1px solid var(--border)',
             background: 'var(--surface)'
         }}>
             <div className="container">
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '2rem' }}>
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                    gap: '2rem'
+                }}>
                     <div>
-                        <h3 className="gradient-text" style={{ marginBottom: '1rem' }}>SELLSATHI</h3>
-                        <p className="text-muted">The future of global marketplace. Fast, secure, and seller-friendly.</p>
+                        <h3 className="gradient-text" style={{ marginBottom: '1rem', fontSize: '1.25rem' }}>SELLSATHI</h3>
+                        <p className="text-muted" style={{ fontSize: '0.9rem' }}>The future of global marketplace. Fast, secure, and seller-friendly.</p>
                     </div>
 
                     <div>
-                        <h4>Marketplace</h4>
+                        <h4 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Marketplace</h4>
                         <ul style={{ listStyle: 'none', marginTop: '1rem' }} className="flex flex-col gap-2">
-                            <li><Link to="/products" className="text-muted">All Products</Link></li>
-                            <li><Link to="/categories" className="text-muted">Categories</Link></li>
-                            <li><Link to="/track" className="text-muted">Track Order</Link></li>
+                            <li><Link to="/products" className="text-muted" style={{ fontSize: '0.9rem' }}>All Products</Link></li>
+                            <li><Link to="/categories" className="text-muted" style={{ fontSize: '0.9rem' }}>Categories</Link></li>
+                            <li><Link to="/track" className="text-muted" style={{ fontSize: '0.9rem' }}>Track Order</Link></li>
                         </ul>
                     </div>
 
                     <div>
-                        <h4>Support</h4>
+                        <h4 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Support</h4>
                         <ul style={{ listStyle: 'none', marginTop: '1rem' }} className="flex flex-col gap-2">
-                            <li><Link to="/faq" className="text-muted">FAQ</Link></li>
-                            <li><Link to="/contact" className="text-muted">Contact Us</Link></li>
-                            <li><Link to="/terms" className="text-muted">Terms of Service</Link></li>
+                            <li><Link to="/faq" className="text-muted" style={{ fontSize: '0.9rem' }}>FAQ</Link></li>
+                            <li><Link to="/contact" className="text-muted" style={{ fontSize: '0.9rem' }}>Contact Us</Link></li>
+                            <li><Link to="/terms" className="text-muted" style={{ fontSize: '0.9rem' }}>Terms of Service</Link></li>
                         </ul>
                     </div>
 
                     {user?.role !== 'SELLER' && (
-                        <div style={{ marginTop: '1rem' }}>
+                        <div>
+                            <h4 style={{ marginBottom: '1rem', fontSize: '1rem' }}>Sell on SELLSATHI</h4>
                             <button
                                 onClick={handleBecomeSellerClick}
                                 className="btn btn-primary"
-                                style={{ cursor: 'pointer' }}
+                                style={{ cursor: 'pointer', width: '100%', maxWidth: '200px' }}
                             >
                                 Become a Seller
                             </button>
-                            <p className="text-muted" style={{ marginTop: '0.5rem' }}>Open your shop in minutes.</p>
+                            <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>Open your shop in minutes.</p>
                         </div>
                     )}
                 </div>
 
-                <div style={{ marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
-                    <p className="text-muted">&copy; 2026 SELLSATHI Inc. All rights reserved.</p>
+                <div style={{
+                    marginTop: '3rem',
+                    paddingTop: '2rem',
+                    borderTop: '1px solid var(--border)',
+                    textAlign: 'center'
+                }}>
+                    <p className="text-muted" style={{ fontSize: '0.875rem' }}>&copy; 2026 SELLSATHI Inc. All rights reserved.</p>
                 </div>
             </div>
 

@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingCart, User, Search, LogOut, ChevronDown, LayoutDashboard } from 'lucide-react';
+import { ShoppingCart, User, Search, LogOut, ChevronDown, LayoutDashboard, Menu, X } from 'lucide-react';
 import AuthModal from '../common/AuthModal';
 
 export default function Navbar() {
     const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
     const [user, setUser] = useState(null);
     const navigate = useNavigate();
     const location = useLocation();
@@ -44,6 +45,7 @@ export default function Navbar() {
         localStorage.removeItem('user');
         setUser(null);
         setIsProfileOpen(false);
+        setIsMobileMenuOpen(false);
         window.dispatchEvent(new CustomEvent('userDataChanged'));
         navigate('/');
     };
@@ -51,6 +53,7 @@ export default function Navbar() {
     const handleLoginSuccess = () => {
         setIsLoginModalOpen(false);
         setIsProfileOpen(false);
+        setIsMobileMenuOpen(false);
         // User data will be updated via the userDataChanged event listener
     };
 
@@ -58,7 +61,7 @@ export default function Navbar() {
         <>
             <nav className="glass-card" style={{
                 margin: '1rem',
-                padding: '0.75rem 2rem',
+                padding: '0.75rem 1.5rem',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
@@ -70,8 +73,9 @@ export default function Navbar() {
                     SELLSATHI
                 </Link>
 
+                {/* Desktop Search - Only on home page */}
                 {location.pathname === '/' && (
-                    <div className="flex gap-8 items-center">
+                    <div className="desktop-only flex gap-8 items-center">
                         <div style={{ position: 'relative' }}>
                             <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
                             <input
@@ -84,8 +88,6 @@ export default function Navbar() {
                                     } else {
                                         params.delete('search');
                                     }
-                                    // Use history.pushState or similar if not using react-router setSearchParams directly in Navbar to avoid re-renders of the whole nav? 
-                                    // Actually, we can just use navigate with existing params + search
                                     navigate(`/?${params.toString()}`);
                                 }}
                                 style={{ paddingLeft: '2.5rem', width: '300px', height: '40px' }}
@@ -94,7 +96,8 @@ export default function Navbar() {
                     </div>
                 )}
 
-                <div className="flex gap-4 items-center">
+                {/* Desktop Navigation */}
+                <div className="desktop-only flex gap-4 items-center">
                     <Link to="/checkout" className="btn btn-secondary icon-btn"><ShoppingCart size={20} /></Link>
 
                     {(user?.role === 'SELLER' || user?.role === 'ADMIN') &&
@@ -246,7 +249,142 @@ export default function Navbar() {
                         </button>
                     )}
                 </div>
+
+                {/* Mobile Menu Button */}
+                <button
+                    className="mobile-only btn btn-secondary icon-btn"
+                    onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+                    style={{ padding: '0.5rem' }}
+                >
+                    {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
+                </button>
             </nav>
+
+            {/* Mobile Menu Overlay */}
+            {isMobileMenuOpen && (
+                <div
+                    className="mobile-only"
+                    style={{
+                        position: 'fixed',
+                        top: '5rem',
+                        left: '1rem',
+                        right: '1rem',
+                        backgroundColor: 'var(--background)',
+                        border: '1px solid var(--border)',
+                        borderRadius: '1rem',
+                        boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)',
+                        zIndex: 999,
+                        padding: '1rem',
+                        maxHeight: 'calc(100vh - 7rem)',
+                        overflowY: 'auto'
+                    }}
+                >
+                    {/* Mobile Search */}
+                    {location.pathname === '/' && (
+                        <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ position: 'relative' }}>
+                                <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                                <input
+                                    type="text"
+                                    placeholder="Search products..."
+                                    onChange={(e) => {
+                                        const params = new URLSearchParams(window.location.search);
+                                        if (e.target.value) {
+                                            params.set('search', e.target.value);
+                                        } else {
+                                            params.delete('search');
+                                        }
+                                        navigate(`/?${params.toString()}`);
+                                    }}
+                                    style={{ paddingLeft: '2.5rem', width: '100%', height: '40px' }}
+                                />
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Mobile Navigation Links */}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                        <Link
+                            to="/checkout"
+                            className="btn btn-secondary"
+                            style={{ width: '100%', justifyContent: 'flex-start' }}
+                            onClick={() => setIsMobileMenuOpen(false)}
+                        >
+                            <ShoppingCart size={20} />
+                            <span style={{ marginLeft: '0.5rem' }}>Cart</span>
+                        </Link>
+
+                        {(user?.role === 'SELLER' || user?.role === 'ADMIN') && (
+                            <Link
+                                to={user.role === 'ADMIN' ? "/admin" : "/seller/dashboard"}
+                                className="btn btn-primary"
+                                style={{ width: '100%', justifyContent: 'flex-start' }}
+                                onClick={() => setIsMobileMenuOpen(false)}
+                            >
+                                <LayoutDashboard size={20} />
+                                <span style={{ marginLeft: '0.5rem' }}>Dashboard</span>
+                            </Link>
+                        )}
+
+                        {user ? (
+                            <>
+                                <div style={{
+                                    padding: '1rem',
+                                    backgroundColor: 'hsla(230, 85%, 60%, 0.05)',
+                                    borderRadius: '0.5rem',
+                                    marginTop: '0.5rem'
+                                }}>
+                                    <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', margin: 0 }}>Logged in as</p>
+                                    <p style={{ fontSize: '1rem', fontWeight: 'bold', margin: '4px 0' }}>{user.phone}</p>
+                                    <span style={{
+                                        fontSize: '0.75rem',
+                                        padding: '4px 8px',
+                                        backgroundColor: 'var(--primary)',
+                                        color: 'white',
+                                        borderRadius: '4px',
+                                        textTransform: 'capitalize'
+                                    }}>
+                                        {user.role}
+                                    </span>
+                                </div>
+
+                                <button
+                                    onClick={() => {
+                                        setIsLoginModalOpen(true);
+                                        setIsMobileMenuOpen(false);
+                                    }}
+                                    className="btn btn-secondary"
+                                    style={{ width: '100%', justifyContent: 'flex-start' }}
+                                >
+                                    <User size={20} />
+                                    <span style={{ marginLeft: '0.5rem' }}>Switch User</span>
+                                </button>
+
+                                <button
+                                    onClick={handleSignOut}
+                                    className="btn btn-secondary"
+                                    style={{ width: '100%', justifyContent: 'flex-start', color: 'var(--danger, #ff6b6b)' }}
+                                >
+                                    <LogOut size={20} />
+                                    <span style={{ marginLeft: '0.5rem' }}>Sign Out</span>
+                                </button>
+                            </>
+                        ) : (
+                            <button
+                                onClick={() => {
+                                    setIsLoginModalOpen(true);
+                                    setIsMobileMenuOpen(false);
+                                }}
+                                className="btn btn-primary"
+                                style={{ width: '100%', justifyContent: 'flex-start' }}
+                            >
+                                <User size={20} />
+                                <span style={{ marginLeft: '0.5rem' }}>Login</span>
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
 
             <AuthModal
                 isOpen={isLoginModalOpen}
