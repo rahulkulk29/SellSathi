@@ -62,55 +62,70 @@ export default function Footer() {
     };
 
     return (
-        <footer className="glass-blur" style={{
-            marginTop: '8rem',
-            padding: '6rem 0 3rem 0',
-            background: 'var(--surface)',
-            borderTop: 'none',
-            boxShadow: '0 -10px 40px rgba(0,0,0,0.02)'
+        <footer style={{
+            marginTop: '10rem',
+            padding: '8rem 0 4rem 0',
+            background: '#ffffff',
+            borderTop: '1px solid var(--border)',
+            boxShadow: '0 -10px 40px rgba(0,0,0,0.01)'
         }}>
             <div className="container">
                 <div style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                    gap: '4rem'
+                    gap: '5rem'
                 }}>
                     <div className="flex flex-col gap-6">
-                        <Link to="/" style={{ fontSize: '2rem', fontWeight: '900', letterSpacing: '-0.06em' }} className="gradient-text">
+                        <Link to="/" style={{ fontSize: '2rem', fontWeight: '900', letterSpacing: '-0.06em', color: 'var(--text)' }} className="gradient-text">
                             SELLSATHI
                         </Link>
-                        <p className="text-muted" style={{ fontSize: '1.1rem', lineHeight: 1.6, maxWidth: '300px' }}> Empowering creators and small businesses through a premium global marketplace experience.</p>
-                        <div className="flex gap-4">
-                            {/* Social Placeholders if needed */}
-                        </div>
+                        <p style={{ fontSize: '1rem', lineHeight: 1.7, maxWidth: '320px', color: 'var(--text-muted)', fontWeight: 500 }}>
+                            Empowering creators and small businesses through a premium global marketplace experience designed for the modern era.
+                        </p>
                     </div>
 
                     <div>
-                        <h4 style={{ marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Shop</h4>
+                        <h4 style={{ marginBottom: '1.75rem', fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text)' }}>Shop</h4>
                         <ul style={{ listStyle: 'none' }} className="flex flex-col gap-4">
-                            <li><Link to="/products" className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>All Products</Link></li>
-                            <li><Link to="/categories" className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>Featured Categories</Link></li>
-                            <li><Link to="/track" className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>Order Tracking</Link></li>
+                            <li><Link to="/products" style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-muted)' }}>All Products</Link></li>
+                            <li><Link to="/categories" style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-muted)' }}>Featured Categories</Link></li>
+                            <li><Link to="/track" style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-muted)' }}>Order Tracking</Link></li>
                         </ul>
                     </div>
 
                     <div>
-                        <h4 style={{ marginBottom: '1.5rem', fontSize: '1.1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px' }}>Company</h4>
+                        <h4 style={{ marginBottom: '1.75rem', fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '2px', color: 'var(--text)' }}>Company</h4>
                         <ul style={{ listStyle: 'none' }} className="flex flex-col gap-4">
-                            <li><Link to="/faq" className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>Help Center</Link></li>
-                            <li><Link to="/contact" className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>Contact Specialist</Link></li>
-                            <li><Link to="/terms" className="text-muted" style={{ fontSize: '1rem', fontWeight: 500 }}>Privacy & Terms</Link></li>
+                            <li><Link to="/faq" style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-muted)' }}>Help Center</Link></li>
+                            <li><Link to="/contact" style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-muted)' }}>Contact Specialist</Link></li>
+                            <li><Link to="/terms" style={{ fontSize: '0.95rem', fontWeight: 600, color: 'var(--text-muted)' }}>Privacy & Terms</Link></li>
                         </ul>
                     </div>
 
                     {user?.role !== 'SELLER' && (
-                        <div className="glass-card" style={{ padding: '2rem', border: 'none', background: 'var(--primary-soft)', borderRadius: '1.5rem' }}>
-                            <h4 style={{ marginBottom: '1rem', fontSize: '1.25rem', fontWeight: 900 }}>Ready to grow?</h4>
-                            <p className="text-muted" style={{ marginBottom: '1.5rem', fontSize: '0.95rem' }}>Join 50,000+ sellers worldwide who trust Sellsathi.</p>
+                        <div className="glass-card" style={{ 
+                            padding: '2.5rem', 
+                            border: 'none', 
+                            background: 'var(--primary-gradient)', 
+                            borderRadius: '1.5rem',
+                            boxShadow: 'var(--glow-shadow)',
+                            color: 'white'
+                        }}>
+                            <h4 style={{ marginBottom: '0.75rem', fontSize: '1.5rem', fontWeight: 900, letterSpacing: '-0.02em' }}>Ready to grow?</h4>
+                            <p style={{ marginBottom: '1.75rem', fontSize: '0.95rem', fontWeight: 500, opacity: 0.9 }}>Join 50,000+ sellers worldwide who trust Sellsathi to scale their business.</p>
                             <button
                                 onClick={handleBecomeSellerClick}
-                                className="btn btn-primary"
-                                style={{ width: '100%', borderRadius: '1rem', padding: '1rem' }}
+                                className="btn"
+                                style={{ 
+                                    width: '100%', 
+                                    borderRadius: '1rem', 
+                                    padding: '1rem',
+                                    background: 'white',
+                                    color: 'var(--primary)',
+                                    fontWeight: 800,
+                                    fontSize: '1rem',
+                                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)'
+                                }}
                             >
                                 Get Started
                             </button>
@@ -119,12 +134,12 @@ export default function Footer() {
                 </div>
 
                 <div style={{
-                    marginTop: '6rem',
-                    paddingTop: '2rem',
+                    marginTop: '8rem',
+                    paddingTop: '2.5rem',
                     borderTop: '1px solid var(--border)',
                     textAlign: 'center'
                 }}>
-                    <p className="text-muted" style={{ fontSize: '0.9rem', fontWeight: 500 }}>&copy; 2026 SELLSATHI • Designed for the modern era.</p>
+                    <p style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>&copy; 2026 SELLSATHI • Designed for visual excellence.</p>
                 </div>
             </div>
 
