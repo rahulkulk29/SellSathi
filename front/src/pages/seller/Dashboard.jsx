@@ -1,11 +1,12 @@
-import { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, DollarSign, Plus, Edit2, Trash2, Truck, Loader, X, Home } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, DollarSign, Plus, Edit2, Trash2, Truck, Loader, X, Home, Menu } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { auth } from '../../config/firebase';
 
 export default function SellerDashboard() {
     const [activeTab, setActiveTab] = useState('overview');
     const [loading, setLoading] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
     // Data States
     const [stats, setStats] = useState({ totalSales: 0, totalProducts: 0, newOrders: 0, pendingOrders: 0 });
@@ -130,375 +131,322 @@ export default function SellerDashboard() {
         { label: 'Pending', value: stats.pendingOrders, icon: <Truck />, color: 'var(--warning)' },
     ];
 
-    if (loading) return <div className="flex justify-center items-center h-screen"><Loader className="animate-spin" /></div>;
+    if (loading) return <div className="flex justify-center items-center h-screen"><Loader className="animate-spin text-primary" /></div>;
 
     return (
-        <div className="flex" style={{ minHeight: 'calc(100vh - 80px)', width: '100%', gap: '2rem', padding: '2rem' }}>
-            {/* Sidebar */}
-            <aside className="glass-card flex flex-col justify-between" style={{ width: '280px', height: 'calc(100vh - 120px)', padding: '1.5rem', position: 'sticky', top: '2rem' }}>
-                <div>
-                    <h3 style={{ marginBottom: '2rem', fontSize: '1.5rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>Seller Portal</h3>
-                    <nav className="flex flex-col gap-2">
-                        <Link
-                            to="/"
-                            className="btn btn-secondary"
-                            style={{
-                                width: '100%',
-                                justifyContent: 'flex-start',
-                                textTransform: 'capitalize',
-                                padding: '1rem',
-                                fontSize: '1rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                marginBottom: '0.5rem'
-                            }}
-                        >
-                            <Home size={20} />
-                            Home
-                        </Link>
-                        {['overview', 'products', 'orders'].map(tab => (
-                            <button
-                                key={tab}
-                                className={`btn ${activeTab === tab ? 'btn-primary' : 'btn-secondary'}`}
-                                style={{
-                                    width: '100%',
-                                    justifyContent: 'flex-start',
-                                    textTransform: 'capitalize',
-                                    padding: '1rem',
-                                    fontSize: '1rem'
-                                }}
-                                onClick={() => setActiveTab(tab)}
-                            >
-                                {tab === 'overview' && <LayoutDashboard size={20} />}
-                                {tab === 'products' && <Package size={20} />}
-                                {tab === 'orders' && <ShoppingBag size={20} />}
-                                {tab}
-                            </button>
-                        ))}
-                    </nav>
-                </div>
-
-                <div style={{ marginTop: 'auto', padding: '1rem', background: 'var(--surface)', borderRadius: 'var(--radius-md)' }}>
-                    <small className="text-muted">Need Help?</small>
-                    <p style={{ fontSize: '0.9rem', marginTop: '0.5rem' }}>Contact Sellsathi Support for assistance.</p>
-                </div>
-            </aside>
-
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col" style={{ height: '100%', gap: '2rem' }}>
-                <div className="glass-card flex justify-between items-center" style={{ padding: '1.5rem 2rem' }}>
-                    <div>
-                        <h2 style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>Welcome back, Seller!</h2>
-                        <p className="text-muted">Here's what's happening with your store today.</p>
-                    </div>
-                </div>
-
-                {activeTab === 'overview' && (
-                    <div className="animate-fade-in flex flex-col" style={{ gap: '2rem' }}>
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem' }}>
-                            {statCards.map((s, i) => (
-                                <div key={i} className="glass-card flex flex-col justify-center gap-4" style={{ minHeight: '180px', padding: '1.5rem' }}>
-                                    <div className="flex items-start justify-between">
-                                        <div style={{ padding: '0.75rem', borderRadius: '12px', background: s.color + '22', color: s.color }}>
-                                            {s.icon}
-                                        </div>
-                                    </div>
-                                    <div>
-                                        <h3 style={{ fontSize: '2.5rem', fontWeight: 700, lineHeight: 1 }}>{s.value}</h3>
-                                        <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '1.1rem' }}>{s.label}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Store Performance Placeholder */}
-                        <div className="glass-card" style={{ minHeight: '300px', display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-                            <h3 style={{ marginBottom: '1rem' }}>Store Performance</h3>
-                            <p className="text-muted" style={{ maxWidth: '600px' }}>
-                                Your sales analytics and performance charts will appear here as your store grows. Keep adding quality products!
-                            </p>
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'products' && (
-                    <div className="animate-fade-in flex flex-col gap-4" style={{ height: '100%' }}>
-                        <div className="flex justify-between items-center mb-4">
-                            <h3>Manage Products ({products.length})</h3>
-                            <button className="btn btn-primary" onClick={() => setShowAddModal(true)} style={{ padding: '0.75rem 1.5rem' }}>
-                                <Plus size={20} /> Add New Product
-                            </button>
-                        </div>
-
-                        <div className="glass-card flex-1" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                            {products.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center p-12 text-center h-full">
-                                    <Package size={64} className="text-muted mb-4" />
-                                    <h3>No Products Yet</h3>
-                                    <p className="text-muted mb-4">Start selling by adding your first product using the button above.</p>
-                                </div>
-                            ) : (
-                                <div style={{ overflowX: 'auto', flex: 1 }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <thead style={{ background: 'var(--surface)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
-                                            <tr>
-                                                <th style={{ padding: '1.25rem' }}>Product Details</th>
-                                                <th>Category</th>
-                                                <th>Price</th>
-                                                <th>Stock</th>
-                                                <th style={{ padding: '1.25rem' }}>Actions</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {products.map(p => (
-                                                <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                                    <td style={{ padding: '1.25rem' }}>
-                                                        <div className="flex items-center gap-4">
-                                                            {p.image ? (
-                                                                <img src={p.image} style={{ width: '50px', height: '50px', borderRadius: '8px', objectFit: 'cover' }} />
-                                                            ) : (
-                                                                <div style={{ width: '50px', height: '50px', borderRadius: '8px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                    <Package size={20} className="text-muted" />
-                                                                </div>
-                                                            )}
-                                                            <div>
-                                                                <p style={{ fontWeight: 600 }}>{p.title}</p>
-                                                            </div>
-                                                        </div>
-                                                    </td>
-                                                    <td>
-                                                        <span style={{ background: 'var(--surface)', padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.85rem' }}>
-                                                            {p.category}
-                                                        </span>
-                                                    </td>
-                                                    <td style={{ fontWeight: 600 }}>₹{p.price}</td>
-                                                    <td>
-                                                        <div className="flex items-center gap-2">
-                                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: p.stock > 0 ? 'var(--success)' : 'var(--error)' }}></div>
-                                                            {p.stock || 0} in stock
-                                                        </div>
-                                                    </td>
-                                                    <td style={{ padding: '1.25rem' }}>
-                                                        <div className="flex gap-2">
-                                                            <button
-                                                                className="btn btn-secondary"
-                                                                style={{ padding: '0.5rem', color: 'var(--error)', borderColor: 'var(--error)22', background: 'var(--error)11' }}
-                                                                onClick={() => handleDeleteProduct(p.id)}
-                                                                title="Delete Product"
-                                                            >
-                                                                <Trash2 size={16} />
-                                                            </button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
-
-                {activeTab === 'orders' && (
-                    <div className="animate-fade-in flex flex-col gap-4" style={{ height: '100%' }}>
-                        <div className="mb-4">
-                            <h3>Customer Orders ({orders.length})</h3>
-                        </div>
-
-                        <div className="glass-card flex-1" style={{ padding: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-                            {orders.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center p-12 text-center h-full">
-                                    <ShoppingBag size={64} className="text-muted mb-4" />
-                                    <h3>No Orders Yet</h3>
-                                    <p className="text-muted">Orders will appear here once customers start buying your products.</p>
-                                </div>
-                            ) : (
-                                <div style={{ overflowX: 'auto', flex: 1 }}>
-                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                                        <thead style={{ background: 'var(--surface)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
-                                            <tr>
-                                                <th style={{ padding: '1.25rem' }}>Order ID</th>
-                                                <th>Customer</th>
-                                                <th>Total Amount</th>
-                                                <th>Status</th>
-                                                <th style={{ padding: '1.25rem' }}>Action</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            {orders.map(o => (
-                                                <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                                    <td style={{ padding: '1.25rem', fontFamily: 'monospace', fontWeight: 600 }}>#{o.orderId}</td>
-                                                    <td>
-                                                        <div className="flex items-center gap-2">
-                                                            <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'var(--primary)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>
-                                                                {o.customer.charAt(0)}
-                                                            </div>
-                                                            {o.customer}
-                                                        </div>
-                                                    </td>
-                                                    <td style={{ fontWeight: 600 }}>₹{o.total}</td>
-                                                    <td>
-                                                        <span style={{
-                                                            padding: '0.35rem 0.75rem',
-                                                            borderRadius: '6px',
-                                                            fontSize: '0.85rem',
-                                                            fontWeight: 500,
-                                                            background: o.status === 'Delivered' ? 'rgba(var(--success-rgb), 0.1)' : 'rgba(var(--warning-rgb), 0.1)',
-                                                            color: o.status === 'Delivered' ? 'var(--success)' : 'var(--warning)',
-                                                            display: 'inline-flex',
-                                                            alignItems: 'center',
-                                                            gap: '0.5rem'
-                                                        }}>
-                                                            <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: 'currentColor' }}></span>
-                                                            {o.status}
-                                                        </span>
-                                                    </td>
-                                                    <td style={{ padding: '1.25rem' }}>
-                                                        <button
-                                                            onClick={() => handleUpdateStatus(o.id, o.status)}
-                                                            className="btn btn-secondary btn-sm flex items-center gap-2"
-                                                        >
-                                                            Update Status
-                                                        </button>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
+        <div className="flex flex-col md:flex-row" style={{ minHeight: 'calc(100vh - 80px)', background: 'var(--background)' }}>
+            {/* Mobile Header */}
+            <div className="mobile-only glass-blur flex items-center justify-between" style={{ padding: '1rem 1.5rem', position: 'sticky', top: '80px', zIndex: 100 }}>
+                <h3 style={{ margin: 0 }}>Seller Portal</h3>
+                <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.5rem', borderRadius: '50%', width: '40px', height: '40px' }}
+                    onClick={() => setIsSidebarOpen(true)}
+                >
+                    <Menu size={20} />
+                </button>
             </div>
 
-            {/* Add Product Modal */}
-            {showAddModal && (
-                <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-                }}>
-                    <div className="glass-card animate-scale-in" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto', padding: '2rem' }}>
-                        <div className="flex justify-between items-center" style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
-                            <div>
-                                <h3 style={{ fontSize: '1.4rem' }}>Add New Product</h3>
-                                <p className="text-muted" style={{ fontSize: '0.9rem' }}>Fill in the details to list your item.</p>
-                            </div>
-                            <button onClick={() => setShowAddModal(false)} className="btn btn-ghost" style={{ padding: '0.5rem' }}>
-                                <X size={24} />
+            {/* Sidebar Navigation */}
+            <AnimatePresence mode="wait">
+                {(isSidebarOpen || window.innerWidth > 768) && (
+                    <motion.aside
+                        key="sidebar"
+                        initial={window.innerWidth <= 768 ? { x: '-100%' } : { x: 0 }}
+                        animate={{ x: 0 }}
+                        exit={{ x: '-100%' }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                        className={`${window.innerWidth <= 768 ? 'fixed' : 'sticky'} glass-card flex flex-col`}
+                        style={{
+                            width: window.innerWidth <= 768 ? '85%' : '280px',
+                            maxWidth: '300px',
+                            height: window.innerWidth <= 768 ? '100vh' : 'calc(100vh - 80px)',
+                            top: window.innerWidth <= 768 ? 0 : '80px',
+                            left: 0,
+                            zIndex: 1000,
+                            borderRadius: window.innerWidth <= 768 ? 0 : '0 2rem 2rem 0',
+                            border: 'none',
+                            padding: '2rem 1.5rem',
+                            boxShadow: '10px 0 40px rgba(0,0,0,0.03)'
+                        }}
+                    >
+                        <div className="flex justify-between items-center mb-10">
+                            <h3 style={{ margin: 0, fontSize: '1.5rem', fontWeight: '800' }}>Seller <span className="gradient-text">Portal</span></h3>
+                            <button className="mobile-only btn btn-secondary" onClick={() => setIsSidebarOpen(false)} style={{ borderRadius: '50%', padding: '0.4rem' }}>
+                                <X size={18} />
                             </button>
                         </div>
-                        <form onSubmit={handleAddProduct} className="flex flex-col gap-6">
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Title</label>
-                                <input
-                                    type="text" placeholder="e.g. Traditional Hand-Woven Pashmina Shawl" required
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                    value={newProduct.title} onChange={e => setNewProduct({ ...newProduct, title: e.target.value })}
-                                />
-                            </div>
 
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                                <div className="form-group">
-                                    <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Price (₹)</label>
-                                    <div className="relative">
-                                        <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: 'var(--primary)' }}>₹</span>
-                                        <input
-                                            type="number" placeholder="0.00" required
-                                            className="input-field"
-                                            style={{ width: '100%', padding: '1rem 1rem 1rem 2.5rem', borderRadius: '12px' }}
-                                            value={newProduct.price} onChange={e => setNewProduct({ ...newProduct, price: e.target.value })}
-                                        />
-                                    </div>
-                                </div>
-                                <div className="form-group">
-                                    <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Stock Status</label>
-                                    <input
-                                        type="number" placeholder="Units available" required
-                                        className="input-field"
-                                        style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                        value={newProduct.stock} onChange={e => setNewProduct({ ...newProduct, stock: e.target.value })}
-                                    />
-                                </div>
-                            </div>
+                        <nav className="flex flex-col gap-2">
+                            <Link
+                                to="/"
+                                className="btn btn-secondary"
+                                style={{ width: '100%', justifyContent: 'flex-start', gap: '0.75rem', borderRadius: '1rem', border: 'none' }}
+                            >
+                                <Home size={20} /> Home View
+                            </Link>
 
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Category</label>
-                                <select
-                                    required
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                    value={newProduct.category} onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
+                            <div style={{ height: '1px', background: 'var(--border)', margin: '1rem 0' }} />
+
+                            {[
+                                { id: 'overview', icon: <LayoutDashboard size={20} />, label: 'Overview' },
+                                { id: 'products', icon: <Package size={20} />, label: 'Inventory' },
+                                { id: 'orders', icon: <ShoppingBag size={20} />, label: 'Orders' }
+                            ].map(tab => (
+                                <button
+                                    key={tab.id}
+                                    className={`btn ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'}`}
+                                    style={{
+                                        width: '100%',
+                                        justifyContent: 'flex-start',
+                                        gap: '0.75rem',
+                                        borderRadius: '1rem',
+                                        border: 'none',
+                                        background: activeTab === tab.id ? undefined : 'transparent',
+                                        boxShadow: activeTab === tab.id ? undefined : 'none'
+                                    }}
+                                    onClick={() => {
+                                        setActiveTab(tab.id);
+                                        setIsSidebarOpen(false);
+                                    }}
                                 >
-                                    <option value="">Select Category</option>
-                                    <option value="Clothing">Clothing</option>
-                                    <option value="Accessories">Accessories</option>
-                                    <option value="Home Decor">Home Decor</option>
-                                    <option value="Art">Art & Crafts</option>
-                                    <option value="Food">Food & Beverages</option>
-                                    <option value="Other">Other</option>
-                                </select>
+                                    {tab.icon}
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </nav>
+
+                        <div style={{ marginTop: 'auto', padding: '1.5rem', background: 'var(--primary-soft)', borderRadius: '1.25rem' }}>
+                            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--primary)', marginBottom: '0.5rem' }}>DASHBOARD V2.0</p>
+                            <p style={{ fontSize: '0.8rem', opacity: 0.7, margin: 0 }}>Advanced analytics and inventory tools enabled.</p>
+                        </div>
+                    </motion.aside>
+                )}
+            </AnimatePresence>
+
+            {/* Main Content */}
+            <main className="flex-1" style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
+                <header style={{ marginBottom: '2.5rem' }}>
+                    <h1 style={{ fontSize: '2.5rem', fontWeight: '900', letterSpacing: '-0.02em', margin: 0 }}>
+                        {activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+                    </h1>
+                    <p className="text-muted" style={{ fontSize: '1.1rem' }}>Manage your artisanal business and track performance.</p>
+                </header>
+
+                <AnimatePresence mode="wait">
+                    {activeTab === 'overview' && (
+                        <motion.div 
+                            key="overview"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="flex flex-col gap-8"
+                        >
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem' }}>
+                                {statCards.map((s, i) => (
+                                    <div key={i} className="glass-card flex flex-col gap-4" style={{ padding: '1.5rem' }}>
+                                        <div style={{ padding: '0.75rem', borderRadius: '12px', background: s.color + '22', color: s.color, width: 'fit-content' }}>
+                                            {s.icon}
+                                        </div>
+                                        <div>
+                                            <h3 style={{ fontSize: '2rem', fontWeight: 800, margin: 0 }}>{s.value}</h3>
+                                            <p className="text-muted" style={{ fontSize: '0.95rem' }}>{s.label}</p>
+                                        </div>
+                                    </div>
+                                ))}
                             </div>
 
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Image</label>
-                                <div style={{
-                                    border: '2px dashed var(--border)',
-                                    borderRadius: '12px',
-                                    padding: '1.5rem',
-                                    textAlign: 'center',
-                                    background: 'var(--surface)',
-                                    marginBottom: '1rem'
-                                }}>
-                                    <input
-                                        type="text"
-                                        placeholder="Paste image URL here..."
-                                        className="input-field"
-                                        style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem' }}
-                                        value={newProduct.image}
-                                        onChange={e => setNewProduct({ ...newProduct, image: e.target.value })}
-                                    />
-                                    <p className="text-muted" style={{ fontSize: '0.8rem' }}>Please provide a high-quality URL for your product image.</p>
+                            <div className="glass-card flex flex-col items-center justify-center text-center" style={{ padding: '4rem 2rem', border: '1px dashed var(--border)' }}>
+                                <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'var(--primary-soft)', display: 'flex', alignItems: 'center', justifyCenter: 'center', color: 'var(--primary)', marginBottom: '1.5rem' }}>
+                                    <LayoutDashboard size={32} />
                                 </div>
-                                {newProduct.image && (
-                                    <div style={{ position: 'relative', height: '200px', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
-                                        <img src={newProduct.image} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                            onError={(e) => { e.target.src = 'https://via.placeholder.com/400x200?text=Invalid+Image+URL'; }} />
-                                        <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
-                                            <button
-                                                type="button"
-                                                className="btn btn-secondary icon-btn"
-                                                style={{ background: 'white', color: 'var(--danger)' }}
-                                                onClick={() => setNewProduct({ ...newProduct, image: '' })}
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
-                                        </div>
+                                <h3 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Performance Insights</h3>
+                                <p className="text-muted" style={{ maxWidth: '500px' }}>Advanced sales charts and customer behavior analytics are being generated for your shop.</p>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {activeTab === 'products' && (
+                        <motion.div 
+                            key="products"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="flex flex-col gap-6"
+                        >
+                            <div className="flex justify-between items-center bg-white" style={{ padding: '1rem 1.5rem', borderRadius: '1.25rem', border: '1px solid var(--border)' }}>
+                                <h3 style={{ margin: 0 }}>Store Inventory ({products.length})</h3>
+                                <button className="btn btn-primary" onClick={() => setShowAddModal(true)} style={{ borderRadius: '999px' }}>
+                                    <Plus size={18} /> Add Product
+                                </button>
+                            </div>
+
+                            <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                                {products.length === 0 ? (
+                                    <div className="p-20 text-center">
+                                        <Package size={48} className="text-muted mb-4" />
+                                        <p>No products listed yet.</p>
+                                    </div>
+                                ) : (
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                            <thead style={{ background: 'var(--surface)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                                                <tr>
+                                                    <th style={{ padding: '1.25rem' }}>Product</th>
+                                                    <th>Category</th>
+                                                    <th>Price</th>
+                                                    <th>Stock</th>
+                                                    <th style={{ padding: '1.25rem', textAlign: 'right' }}>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {products.map(p => (
+                                                    <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                        <td style={{ padding: '1.25rem' }}>
+                                                            <div className="flex items-center gap-4">
+                                                                <img src={p.image || 'https://via.placeholder.com/50'} style={{ width: '48px', height: '48px', borderRadius: '8px', objectFit: 'cover' }} />
+                                                                <span style={{ fontWeight: 600 }}>{p.title}</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="text-muted">{p.category}</td>
+                                                        <td style={{ fontWeight: 700 }}>₹{p.price}</td>
+                                                        <td>
+                                                            <span style={{ fontSize: '0.85rem', padding: '4px 10px', background: p.stock > 0 ? 'var(--success)11' : 'var(--error)11', color: p.stock > 0 ? 'var(--success)' : 'var(--error)', borderRadius: '999px', fontWeight: 700 }}>
+                                                                {p.stock} Units
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '1.25rem', textAlign: 'right' }}>
+                                                            <button 
+                                                                className="btn btn-secondary" 
+                                                                style={{ padding: '0.4rem', color: 'var(--error)', border: 'none' }}
+                                                                onClick={() => handleDeleteProduct(p.id)}
+                                                            >
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
                                     </div>
                                 )}
                             </div>
+                        </motion.div>
+                    )}
 
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Description</label>
-                                <textarea
-                                    placeholder="Tell customers about your product's craft, material, and uniqueness..." rows="5"
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                    value={newProduct.description} onChange={e => setNewProduct({ ...newProduct, description: e.target.value })}
-                                ></textarea>
+                    {activeTab === 'orders' && (
+                        <motion.div 
+                            key="orders"
+                            initial={{ opacity: 0, y: 20 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -20 }}
+                            className="flex flex-col gap-6"
+                        >
+                             <div className="glass-card" style={{ padding: 0, overflow: 'hidden' }}>
+                                {orders.length === 0 ? (
+                                    <div className="p-20 text-center">
+                                        <ShoppingBag size={48} className="text-muted mb-4" />
+                                        <p>No customer orders yet.</p>
+                                    </div>
+                                ) : (
+                                    <div style={{ overflowX: 'auto' }}>
+                                        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                            <thead style={{ background: 'var(--surface)', textAlign: 'left', borderBottom: '1px solid var(--border)' }}>
+                                                <tr>
+                                                    <th style={{ padding: '1.25rem' }}>Order ID</th>
+                                                    <th>Customer</th>
+                                                    <th>Total</th>
+                                                    <th>Status</th>
+                                                    <th style={{ padding: '1.25rem', textAlign: 'right' }}>Action</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {orders.map(o => (
+                                                    <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                        <td style={{ padding: '1.25rem', fontWeight: 800, color: 'var(--primary)' }}>#{o.orderId}</td>
+                                                        <td>{o.customer}</td>
+                                                        <td style={{ fontWeight: 700 }}>₹{o.total}</td>
+                                                        <td>
+                                                            <span style={{ padding: '4px 12px', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 700, background: o.status === 'Delivered' ? 'var(--success)11' : 'var(--warning)11', color: o.status === 'Delivered' ? 'var(--success)' : 'var(--warning)' }}>
+                                                                {o.status}
+                                                            </span>
+                                                        </td>
+                                                        <td style={{ padding: '1.25rem', textAlign: 'right' }}>
+                                                            <button onClick={() => handleUpdateStatus(o.id, o.status)} className="btn btn-secondary" style={{ fontSize: '0.8rem', padding: '0.4rem 0.8rem' }}>
+                                                                Update
+                                                            </button>
+                                                        </td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                )}
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </main>
+
+            {/* Add Product Modal */}
+            <AnimatePresence>
+                {showAddModal && (
+                    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem' }}>
+                        <motion.div 
+                            initial={{ opacity: 0, scale: 0.95 }}
+                            animate={{ opacity: 1, scale: 1 }}
+                            exit={{ opacity: 0, scale: 0.95 }}
+                            className="glass-card" 
+                            style={{ width: '100%', maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto', padding: '2.5rem', background: 'white' }}
+                        >
+                            <div className="flex justify-between items-center mb-8">
+                                <div>
+                                    <h2 style={{ margin: 0 }}>Add New Product</h2>
+                                    <p className="text-muted">List your artisanal masterpiece.</p>
+                                </div>
+                                <button onClick={() => setShowAddModal(false)} className="btn btn-secondary" style={{ borderRadius: '50%', padding: '0.5rem' }}>
+                                    <X size={24} />
+                                </button>
                             </div>
 
-                            <div className="flex justify-end gap-3" style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-                                <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary">Cancel</button>
-                                <button type="submit" className="btn btn-primary" style={{ minWidth: '120px' }}>Add Product</button>
-                            </div>
-                        </form>
+                            <form onSubmit={handleAddProduct} className="flex flex-col gap-6">
+                                <div className="form-group">
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 700 }}>Product Title</label>
+                                    <input type="text" required value={newProduct.title} onChange={e => setNewProduct({ ...newProduct, title: e.target.value })} style={{ width: '100%' }} />
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                    <div className="form-group">
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 700 }}>Price (₹)</label>
+                                        <input type="number" required value={newProduct.price} onChange={e => setNewProduct({ ...newProduct, price: e.target.value })} style={{ width: '100%' }} />
+                                    </div>
+                                    <div className="form-group">
+                                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 700 }}>Stock</label>
+                                        <input type="number" required value={newProduct.stock} onChange={e => setNewProduct({ ...newProduct, stock: e.target.value })} style={{ width: '100%' }} />
+                                    </div>
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 700 }}>Category</label>
+                                    <select required value={newProduct.category} onChange={e => setNewProduct({ ...newProduct, category: e.target.value })} style={{ width: '100%' }}>
+                                        <option value="">Select Category</option>
+                                        <option value="Clothing">Clothing</option>
+                                        <option value="Home Decor">Home Decor</option>
+                                        <option value="Art">Art & Crafts</option>
+                                    </select>
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 700 }}>Image URL</label>
+                                    <input type="text" value={newProduct.image} onChange={e => setNewProduct({ ...newProduct, image: e.target.value })} placeholder="Paste link..." style={{ width: '100%' }} />
+                                </div>
+                                <div className="form-group">
+                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 700 }}>Description</label>
+                                    <textarea rows="4" value={newProduct.description} onChange={e => setNewProduct({ ...newProduct, description: e.target.value })} style={{ width: '100%' }} />
+                                </div>
+                                <button type="submit" className="btn btn-primary" style={{ padding: '1rem', borderRadius: '1rem' }}>Launch Product</button>
+                            </form>
+                        </motion.div>
                     </div>
-                </div>
-            )}
+                )}
+            </AnimatePresence>
         </div>
     );
 }

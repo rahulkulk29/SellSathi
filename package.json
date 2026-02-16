@@ -9,7 +9,14 @@
     "build": "npm --prefix front run build",
     "start": "npm --prefix back run start"
   },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "body-parser": "^1.20.2",
+    "firebase-admin": "^12.0.0"
+  },
   "devDependencies": {
-    "concurrently": "^8.0.1"
+    "concurrently": "^8.0.1",
+    "nodemon": "^3.0.1"
   }
 }

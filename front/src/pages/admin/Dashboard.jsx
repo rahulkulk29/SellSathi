@@ -1,10 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader, Home } from 'lucide-react';
+import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader, Home, Menu, Search, RefreshCw } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 
 export default function AdminDashboard() {
     const [activeTab, setActiveTab] = useState('sellers');
     const [loading, setLoading] = useState(true);
+    const [isSidebarOpen, setIsSidebarOpen] = useState(false);
     const [error, setError] = useState('');
 
     // Data states
@@ -44,7 +46,7 @@ export default function AdminDashboard() {
             if (ordersData.success) setOrders(ordersData.orders);
         } catch (err) {
             console.error('Error fetching data:', err);
-            setError('Failed to load dashboard data. Please refresh.');
+            setError('System connectivity issue. Please verify backend status.');
         } finally {
             setLoading(false);
         }
@@ -88,21 +90,6 @@ export default function AdminDashboard() {
         }
     };
 
-    const StatCard = ({ label, value, icon, color }) => (
-        <div className="glass-card flex flex-col justify-center gap-4" style={{ minHeight: '180px' }}>
-            <div className="flex justify-between items-start">
-                <div style={{ padding: '0.75rem', borderRadius: '12px', background: `${color}22`, color: color }}>
-                    {icon}
-                </div>
-                {/* <span className="text-muted" style={{ fontSize: '0.8rem' }}>+2.5%</span> */}
-            </div>
-            <div>
-                <h3 style={{ fontSize: '2.5rem', fontWeight: 700, lineHeight: 1 }}>{loading ? '-' : value}</h3>
-                <p className="text-muted" style={{ marginTop: '0.5rem', fontSize: '1.1rem' }}>{label}</p>
-            </div>
-        </div>
-    );
-
     const [searchTerm, setSearchTerm] = useState('');
 
     // Filter Logic
@@ -121,277 +108,296 @@ export default function AdminDashboard() {
         o.customer.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
-    // Render Helpers
-    const renderSellersTable = () => (
-        <div className="animate-fade-in flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-                <h3>Pending Approvals ({filteredSellers.length})</h3>
-                <div className="flex gap-2">
-                    <input
-                        type="text"
-                        placeholder="Search sellers..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)' }}
-                    />
-                    <button className="btn btn-secondary" onClick={fetchAllData}>Refresh</button>
-                </div>
-            </div>
-            {filteredSellers.length === 0 ? (
-                <div className="glass-card text-center p-8 text-muted">No pending seller approvals found.</div>
-            ) : (
-                <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
-                            <tr>
-                                <th style={{ padding: '1rem' }}>Shop Name</th>
-                                <th>Contact</th>
-                                <th>Category</th>
-                                <th>Joined</th>
-                                <th style={{ padding: '1rem' }}>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredSellers.map(s => (
-                                <tr key={s.uid} style={{ borderBottom: '1px solid var(--border)' }}>
-                                    <td style={{ padding: '1rem' }}>
-                                        <strong>{s.shopName}</strong><br />
-                                        <small className="text-muted">{s.address}</small>
-                                    </td>
-                                    <td>{s.email}</td>
-                                    <td>{s.category}</td>
-                                    <td>{s.joined}</td>
-                                    <td style={{ padding: '1rem' }}>
-                                        <div className="flex gap-2">
-                                            <button className="btn btn-secondary" onClick={() => handleApproveSeller(s.uid)} title="Approve" style={{ color: 'var(--success)' }}>
-                                                <Check size={18} />
-                                            </button>
-                                            <button className="btn btn-secondary" onClick={() => handleRejectSeller(s.uid)} title="Reject" style={{ color: 'var(--error)' }}>
-                                                <X size={18} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </div>
-    );
-
-    const renderProductsTable = () => (
-        <div className="animate-fade-in flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-                <h3>Product Review ({filteredProducts.length})</h3>
-                <div className="flex gap-2">
-                    <input
-                        type="text"
-                        placeholder="Search products..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)' }}
-                    />
-                    <button className="btn btn-secondary" onClick={fetchAllData}>Refresh</button>
-                </div>
-            </div>
-            {filteredProducts.length === 0 ? (
-                <div className="glass-card text-center p-8 text-muted">No products found.</div>
-            ) : (
-                <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
-                            <tr>
-                                <th style={{ padding: '1rem' }}>Product</th>
-                                <th>Seller</th>
-                                <th>Category</th>
-                                <th>Price</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredProducts.map(p => (
-                                <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                    <td style={{ padding: '1rem' }}>{p.title}</td>
-                                    <td>{p.seller}</td>
-                                    <td>{p.category}</td>
-                                    <td>₹{p.price}</td>
-                                    <td>
-                                        <span className="badge badge-success" style={{ background: 'rgba(var(--success-rgb), 0.1)', color: 'var(--success)', padding: '4px 8px', borderRadius: '4px' }}>
-                                            {p.status}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </div>
-    );
-
-    const renderOrdersTable = () => (
-        <div className="animate-fade-in flex flex-col gap-4">
-            <div className="flex justify-between items-center">
-                <h3>Global Orders ({filteredOrders.length})</h3>
-                <div className="flex gap-2">
-                    <input
-                        type="text"
-                        placeholder="Search orders..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        style={{ padding: '0.5rem', borderRadius: '4px', border: '1px solid var(--border)' }}
-                    />
-                    <button className="btn btn-secondary" onClick={fetchAllData}>Refresh</button>
-                </div>
-            </div>
-            {filteredOrders.length === 0 ? (
-                <div className="glass-card text-center p-8 text-muted">No orders found.</div>
-            ) : (
-                <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                        <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
-                            <tr>
-                                <th style={{ padding: '1rem' }}>Order ID</th>
-                                <th>Customer</th>
-                                <th>Total</th>
-                                <th>Status</th>
-                                <th>Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {filteredOrders.map(o => (
-                                <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                    <td style={{ padding: '1rem' }}><strong>{o.orderId}</strong></td>
-                                    <td>{o.customer}</td>
-                                    <td>₹{o.total.toLocaleString()}</td>
-                                    <td>
-                                        <span style={{ background: 'rgba(var(--primary-rgb), 0.1)', color: 'var(--primary)', padding: '4px 8px', borderRadius: '4px' }}>
-                                            {o.status}
-                                        </span>
-                                    </td>
-                                    <td>{o.date}</td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-            )}
-        </div>
-    );
-
     if (error) {
         return (
-            <div className="container" style={{ padding: '2rem', textAlign: 'center', minHeight: '80vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ color: 'var(--error)', marginBottom: '1rem', background: 'rgba(var(--error-rgb), 0.1)', padding: '1rem', borderRadius: '8px' }}>
-                    <AlertOctagon size={48} style={{ margin: '0 auto 1rem' }} />
-                    <p>{error}</p>
-                </div>
-                <button className="btn btn-primary" onClick={fetchAllData}>
-                    Retry Connection
-                </button>
+            <div className="container flex flex-col items-center justify-center" style={{ minHeight: '80vh', padding: '2rem' }}>
+                <motion.div 
+                    initial={{ opacity: 0, scale: 0.9 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="glass-card text-center" 
+                    style={{ padding: '3rem', maxWidth: '500px' }}
+                >
+                    <div style={{ width: '80px', height: '80px', borderRadius: '50%', background: 'var(--error)11', color: 'var(--error)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 1.5rem' }}>
+                        <AlertOctagon size={40} />
+                    </div>
+                    <h3 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Connectivity Error</h3>
+                    <p className="text-muted mb-6">{error}</p>
+                    <button className="btn btn-primary" onClick={fetchAllData}>
+                        Retry Connection
+                    </button>
+                </motion.div>
             </div>
         );
     }
 
+    const statSpecs = [
+        { label: 'Total Sellers', value: stats.totalSellers, icon: <Users size={24} />, color: 'var(--primary)' },
+        { label: 'Market Products', value: stats.totalProducts, icon: <Box size={24} />, color: 'var(--secondary)' },
+        { label: 'Daily Volume', value: stats.todayOrders, icon: <ShoppingCart size={24} />, color: 'var(--success)' },
+        { label: 'Approvals', value: stats.pendingApprovals, icon: <ShieldCheck size={24} />, color: 'var(--warning)' },
+    ];
+
+    if (loading && !stats.totalSellers) return <div className="flex justify-center items-center h-screen"><Loader className="animate-spin text-primary" /></div>;
+
     return (
-        <div className="flex" style={{ minHeight: 'calc(100vh - 80px)', width: '100%', gap: '2rem', padding: '2rem' }}>
-            {/* Sidebar */}
-            <aside className="glass-card flex flex-col justify-between" style={{ width: '280px', height: 'calc(100vh - 120px)', padding: '1.5rem', position: 'sticky', top: '2rem' }}>
-                <div>
-                    <div className="flex items-center gap-2" style={{ marginBottom: '2rem', color: 'var(--primary)', paddingBottom: '1rem', borderBottom: '1px solid var(--border)' }}>
-                        <ShieldCheck size={28} />
-                        <h3 style={{ fontSize: '1.5rem', margin: 0 }}>Admin Panel</h3>
-                    </div>
-                    <nav className="flex flex-col gap-2">
-                        <Link
-                            to="/"
-                            className="btn btn-secondary"
-                            style={{
-                                width: '100%',
-                                justifyContent: 'flex-start',
-                                textTransform: 'capitalize',
-                                padding: '1rem',
-                                fontSize: '1rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '0.5rem',
-                                marginBottom: '0.5rem'
-                            }}
-                        >
-                            <Home size={20} />
-                            Home
-                        </Link>
-                        <button
-                            className={`btn ${activeTab === 'sellers' ? 'btn-primary' : 'btn-secondary'}`}
-                            style={{
-                                width: '100%',
-                                justifyContent: 'flex-start',
-                                padding: '1rem',
-                                fontSize: '1rem'
-                            }}
-                            onClick={() => { setActiveTab('sellers'); setSearchTerm(''); }}
-                        >
-                            <Users size={20} /> Seller Mgmt
-                        </button>
-                        <button
-                            className={`btn ${activeTab === 'products' ? 'btn-primary' : 'btn-secondary'}`}
-                            style={{
-                                width: '100%',
-                                justifyContent: 'flex-start',
-                                padding: '1rem',
-                                fontSize: '1rem'
-                            }}
-                            onClick={() => { setActiveTab('products'); setSearchTerm(''); }}
-                        >
-                            <Box size={20} /> Product Review
-                        </button>
-                        <button
-                            className={`btn ${activeTab === 'orders' ? 'btn-primary' : 'btn-secondary'}`}
-                            style={{
-                                width: '100%',
-                                justifyContent: 'flex-start',
-                                padding: '1rem',
-                                fontSize: '1rem'
-                            }}
-                            onClick={() => { setActiveTab('orders'); setSearchTerm(''); }}
-                        >
-                            <ShoppingCart size={20} /> Global Orders
-                        </button>
-                    </nav>
+        <div className="flex flex-col md:flex-row" style={{ minHeight: 'calc(100vh - 80px)', background: 'var(--background)' }}>
+            {/* Mobile Admin Header */}
+            <div className="mobile-only glass-blur flex items-center justify-between" style={{ padding: '1rem 1.5rem', position: 'sticky', top: '80px', zIndex: 100 }}>
+                <div className="flex items-center gap-2" style={{ color: 'var(--primary)' }}>
+                    <ShieldCheck size={24} />
+                    <h3 style={{ margin: 0, fontSize: '1.1rem' }}>Admin Panel</h3>
                 </div>
-
-                <div style={{ marginTop: 'auto', padding: '1rem', background: 'var(--surface)', borderRadius: 'var(--radius-md)' }}>
-                    <small className="text-muted">System Status</small>
-                    <div className="flex items-center gap-2" style={{ marginTop: '0.5rem', color: 'var(--success)', fontSize: '0.9rem' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)' }}></div>
-                        Online
-                    </div>
-                </div>
-            </aside>
-
-            {/* Main Content */}
-            <div className="flex-1 flex flex-col" style={{ height: '100%', gap: '2rem' }}>
-                {/* Stats Grid */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem' }}>
-                    <StatCard label="Total Sellers" value={stats.totalSellers} icon={<Users size={32} />} color="var(--primary)" />
-                    <StatCard label="Active Products" value={stats.totalProducts} icon={<Box size={32} />} color="var(--secondary)" />
-                    <StatCard label="Daily Orders" value={stats.todayOrders} icon={<ShoppingCart size={32} />} color="var(--accent)" />
-                    <StatCard label="Pending Approvals" value={stats.pendingApprovals} icon={<ShieldCheck size={32} />} color="var(--warning)" />
-                </div>
-
-                {loading ? (
-                    <div className="flex justify-center p-12 glass-card flex-1"><Loader className="animate-spin" /></div>
-                ) : (
-                    <div className="glass-card flex-1" style={{ padding: '0', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-                        <div style={{ padding: '1.5rem', borderBottom: '1px solid var(--border)' }}>
-                            {activeTab === 'sellers' && renderSellersTable()}
-                            {activeTab === 'products' && renderProductsTable()}
-                            {activeTab === 'orders' && renderOrdersTable()}
-                        </div>
-                    </div>
-                )}
+                <button 
+                    className="btn btn-secondary" 
+                    style={{ padding: '0.5rem', borderRadius: '50%', width: '40px', height: '40px' }}
+                    onClick={() => setIsSidebarOpen(true)}
+                >
+                    <Menu size={20} />
+                </button>
             </div>
+
+            {/* Admin Sidebar */}
+            <AnimatePresence mode="wait">
+                {(isSidebarOpen || window.innerWidth > 768) && (
+                    <motion.aside
+                        key="admin-sidebar"
+                        initial={window.innerWidth <= 768 ? { x: '-100%' } : { x: 0 }}
+                        animate={{ x: 0 }}
+                        exit={{ x: '-100%' }}
+                        transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+                        className={`${window.innerWidth <= 768 ? 'fixed' : 'sticky'} glass-card flex flex-col`}
+                        style={{
+                            width: window.innerWidth <= 768 ? '85%' : '280px',
+                            maxWidth: '300px',
+                            height: window.innerWidth <= 768 ? '100vh' : 'calc(100vh - 80px)',
+                            top: window.innerWidth <= 768 ? 0 : '80px',
+                            left: 0,
+                            zIndex: 1000,
+                            borderRadius: window.innerWidth <= 768 ? 0 : '0 2rem 2rem 0',
+                            border: 'none',
+                            padding: '2rem 1.5rem',
+                            boxShadow: '10px 0 40px rgba(0,0,0,0.03)'
+                        }}
+                    >
+                        <div className="flex justify-between items-center mb-10">
+                            <div className="flex items-center gap-2 text-primary">
+                                <ShieldCheck size={28} />
+                                <h3 style={{ margin: 0, fontSize: '1.4rem', fontWeight: '800' }}>Admin</h3>
+                            </div>
+                            <button className="mobile-only btn btn-secondary" onClick={() => setIsSidebarOpen(false)} style={{ borderRadius: '50%', padding: '0.4rem' }}>
+                                <X size={18} />
+                            </button>
+                        </div>
+
+                        <nav className="flex flex-col gap-2">
+                             <Link
+                                to="/"
+                                className="btn btn-secondary"
+                                style={{ width: '100%', justifyContent: 'flex-start', gap: '0.75rem', borderRadius: '1rem', border: 'none' }}
+                                onClick={() => setIsSidebarOpen(false)}
+                            >
+                                <Home size={20} /> Live Site
+                            </Link>
+
+                            <div style={{ height: '1px', background: 'var(--border)', margin: '1rem 0' }} />
+
+                             {[
+                                { id: 'sellers', icon: <Users size={20} />, label: 'Seller Mgmt' },
+                                { id: 'products', icon: <Box size={20} />, label: 'Marketplace' },
+                                { id: 'orders', icon: <ShoppingCart size={20} />, label: 'Transactions' }
+                            ].map(tab => (
+                                <button
+                                    key={tab.id}
+                                    className={`btn ${activeTab === tab.id ? 'btn-primary' : 'btn-secondary'}`}
+                                    style={{
+                                        width: '100%',
+                                        justifyContent: 'flex-start',
+                                        gap: '0.75rem',
+                                        borderRadius: '1rem',
+                                        border: 'none',
+                                        background: activeTab === tab.id ? undefined : 'transparent',
+                                        boxShadow: activeTab === tab.id ? undefined : 'none'
+                                    }}
+                                    onClick={() => {
+                                        setActiveTab(tab.id);
+                                        setSearchTerm('');
+                                        setIsSidebarOpen(false);
+                                    }}
+                                >
+                                    {tab.icon}
+                                    {tab.label}
+                                </button>
+                            ))}
+                        </nav>
+
+                        <div style={{ marginTop: 'auto', padding: '1.5rem', background: 'var(--surface)', borderRadius: '1.25rem' }}>
+                            <small className="text-muted" style={{ fontWeight: 700 }}>SYSTEM STATUS</small>
+                            <div className="flex items-center gap-2 mt-2" style={{ color: 'var(--success)', fontWeight: 600 }}>
+                                <div className="pulse" style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'currentColor' }}></div>
+                                Operational
+                            </div>
+                        </div>
+                    </motion.aside>
+                )}
+            </AnimatePresence>
+
+            {/* Admin Main Content */}
+            <main className="flex-1" style={{ padding: '2rem', maxWidth: '1400px', margin: '0 auto', width: '100%' }}>
+                <header style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '2.5rem', gap: '1.5rem' }}>
+                    <div>
+                        <h1 style={{ fontSize: '2.5rem', fontWeight: '900', letterSpacing: '-0.02em', margin: 0 }}>Commander</h1>
+                        <p className="text-muted" style={{ fontSize: '1.1rem' }}>Global administrative overview and control center.</p>
+                    </div>
+                    <div className="glass-card flex items-center gap-3 p-2 bg-white" style={{ borderRadius: '1rem', border: '1px solid var(--border)' }}>
+                        <div className="flex items-center gap-2 px-3 border-r border-border">
+                            <Search size={18} className="text-muted" />
+                            <input 
+                                type="text" 
+                                placeholder="Global search..." 
+                                value={searchTerm}
+                                onChange={(e) => setSearchTerm(e.target.value)}
+                                style={{ border: 'none', background: 'none', padding: '0.4rem', outline: 'none', width: '180px' }}
+                            />
+                        </div>
+                        <button onClick={fetchAllData} className="btn btn-secondary" style={{ padding: '0.5rem', minWidth: '40px' }}>
+                            <RefreshCw size={18} className={loading ? 'animate-spin' : ''} />
+                        </button>
+                    </div>
+                </header>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '1.5rem', marginBottom: '3rem' }}>
+                    {statSpecs.map((s, i) => (
+                        <div key={i} className="glass-card flex flex-col gap-4" style={{ padding: '1.5rem' }}>
+                            <div style={{ padding: '0.75rem', borderRadius: '12px', background: s.color + '11', color: s.color, width: 'fit-content' }}>
+                                {s.icon}
+                            </div>
+                            <div>
+                                <h3 style={{ fontSize: '2rem', fontWeight: 800, margin: 0 }}>{loading ? '...' : s.value}</h3>
+                                <p className="text-muted" style={{ fontSize: '0.95rem', fontWeight: 600 }}>{s.label}</p>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+
+                <AnimatePresence mode="wait">
+                    {activeTab === 'sellers' && (
+                        <motion.div key="sellers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="flex flex-col gap-4">
+                            <div className="flex justify-between items-center mb-2">
+                                <h3 style={{ margin: 0, fontWeight: 800 }}>Approval Queue ({filteredSellers.length})</h3>
+                            </div>
+                            {filteredSellers.length === 0 ? (
+                                <div className="glass-card text-center p-20 text-muted">No pending seller registrations.</div>
+                            ) : (
+                                <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
+                                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                        <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
+                                            <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                                <th style={{ padding: '1.25rem' }}>Shop Details</th>
+                                                <th>Identification</th>
+                                                <th>Category</th>
+                                                <th style={{ padding: '1.25rem', textAlign: 'right' }}>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {filteredSellers.map(s => (
+                                                <tr key={s.uid} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                    <td style={{ padding: '1.25rem' }}>
+                                                        <span style={{ fontWeight: 800 }}>{s.shopName}</span><br />
+                                                        <small className="text-muted">{s.address}</small>
+                                                    </td>
+                                                    <td className="text-muted" style={{ fontSize: '0.9rem' }}>{s.email}</td>
+                                                    <td>
+                                                        <span style={{ padding: '4px 10px', background: 'var(--primary-soft)', color: 'var(--primary)', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>
+                                                            {s.category}
+                                                        </span>
+                                                    </td>
+                                                    <td style={{ padding: '1.25rem', textAlign: 'right' }}>
+                                                        <div className="flex gap-2 justify-end">
+                                                            <button className="btn btn-secondary" onClick={() => handleApproveSeller(s.uid)} style={{ color: 'var(--success)', padding: '0.5rem' }}>
+                                                                <Check size={18} />
+                                                            </button>
+                                                            <button className="btn btn-secondary" onClick={() => handleRejectSeller(s.uid)} style={{ color: 'var(--error)', padding: '0.5rem' }}>
+                                                                <X size={18} />
+                                                            </button>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                        </motion.div>
+                    )}
+
+                    {activeTab === 'products' && (
+                        <motion.div key="products" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="flex flex-col gap-4">
+                            <h3 style={{ margin: 0, fontWeight: 800 }}>Marketplace Inventory ({filteredProducts.length})</h3>
+                            <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
+                                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                            <th style={{ padding: '1.25rem' }}>Product Title</th>
+                                            <th>Merchant</th>
+                                            <th>Revenue Point</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredProducts.map(p => (
+                                            <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                <td style={{ padding: '1.25rem', fontWeight: 600 }}>{p.title}</td>
+                                                <td className="text-muted">{p.seller}</td>
+                                                <td style={{ fontWeight: 800 }}>₹{p.price}</td>
+                                                <td>
+                                                    <span style={{ padding: '4px 10px', background: 'var(--success)11', color: 'var(--success)', borderRadius: '999px', fontSize: '0.8rem', fontWeight: 700 }}>
+                                                        {p.status || 'Active'}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </motion.div>
+                    )}
+
+                    {activeTab === 'orders' && (
+                        <motion.div key="orders" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="flex flex-col gap-4">
+                             <h3 style={{ margin: 0, fontWeight: 800 }}>Network Transactions ({filteredOrders.length})</h3>
+                            <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
+                                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                                    <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
+                                        <tr style={{ borderBottom: '1px solid var(--border)' }}>
+                                            <th style={{ padding: '1.25rem' }}>Order Context</th>
+                                            <th>Value</th>
+                                            <th>Workflow</th>
+                                            <th>Timeline</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredOrders.map(o => (
+                                            <tr key={o.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                                                <td style={{ padding: '1.25rem' }}>
+                                                    <span style={{ fontWeight: 800, color: 'var(--primary)' }}>#{o.orderId}</span><br />
+                                                    <small className="text-muted">{o.customer}</small>
+                                                </td>
+                                                <td style={{ fontWeight: 800 }}>₹{o.total.toLocaleString()}</td>
+                                                <td>
+                                                    <span style={{ padding: '4px 10px', background: 'var(--primary-soft)', color: 'var(--primary)', borderRadius: '4px', fontSize: '0.8rem', fontWeight: 700 }}>
+                                                        {o.status}
+                                                    </span>
+                                                </td>
+                                                <td className="text-muted" style={{ fontSize: '0.9rem' }}>{o.date}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </motion.div>
+                    )}
+                </AnimatePresence>
+            </main>
         </div>
     );
 }

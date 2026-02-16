@@ -59,28 +59,29 @@ export default function Navbar() {
 
     return (
         <>
-            <nav className="glass-card" style={{
-                margin: '1rem',
-                padding: '0.75rem 1.5rem',
+            <nav className="glass-blur" style={{
+                margin: '0',
+                padding: '1rem 2rem',
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'center',
                 position: 'sticky',
-                top: '1rem',
-                zIndex: 1000
+                top: '0',
+                zIndex: 1000,
+                height: '80px'
             }}>
-                <Link to="/" style={{ fontSize: '1.5rem', fontWeight: 'bold' }} className="gradient-text">
+                <Link to="/" style={{ fontSize: '1.75rem', fontWeight: '900', letterSpacing: '-0.05em' }} className="gradient-text">
                     SELLSATHI
                 </Link>
-
+                
                 {/* Desktop Search - Only on home page */}
                 {location.pathname === '/' && (
-                    <div className="desktop-only flex gap-8 items-center">
-                        <div style={{ position: 'relative' }}>
-                            <Search size={18} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', opacity: 0.5 }} />
+                    <div className="desktop-only flex items-center" style={{ flex: 1, maxWidth: '500px', margin: '0 2rem' }}>
+                        <div style={{ position: 'relative', width: '100%' }}>
+                            <Search size={18} style={{ position: 'absolute', left: '16px', top: '50%', transform: 'translateY(-50%)', opacity: 0.4 }} />
                             <input
                                 type="text"
-                                placeholder="Search products..."
+                                placeholder="Search for unique items..."
                                 onChange={(e) => {
                                     const params = new URLSearchParams(window.location.search);
                                     if (e.target.value) {
@@ -90,151 +91,147 @@ export default function Navbar() {
                                     }
                                     navigate(`/?${params.toString()}`);
                                 }}
-                                style={{ paddingLeft: '2.5rem', width: '300px', height: '40px' }}
+                                style={{ 
+                                    paddingLeft: '3rem', 
+                                    width: '100%', 
+                                    height: '48px', 
+                                    borderRadius: '999px',
+                                    border: '1px solid var(--border)',
+                                    background: 'var(--background)',
+                                    boxShadow: 'var(--shadow-sm)',
+                                    fontSize: '0.95rem'
+                                }}
                             />
                         </div>
                     </div>
                 )}
 
                 {/* Desktop Navigation */}
-                <div className="desktop-only flex gap-4 items-center">
-                    <Link to="/checkout" className="btn btn-secondary icon-btn"><ShoppingCart size={20} /></Link>
+                <div className="desktop-only">
+                    <div className="flex gap-4 items-center">
+                        <Link to="/checkout" className="btn btn-secondary" style={{ borderRadius: '999px', width: '48px', height: '48px', padding: 0 }}>
+                            <ShoppingCart size={20} />
+                        </Link>
 
-                    {(user?.role === 'SELLER' || user?.role === 'ADMIN') &&
-                        !location.pathname.startsWith(user.role === 'ADMIN' ? '/admin' : '/seller/dashboard') && (
-                            <Link
-                                to={user.role === 'ADMIN' ? "/admin" : "/seller/dashboard"}
-                                className="btn btn-primary"
-                                style={{
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    gap: '0.5rem',
-                                    padding: '0.5rem 1rem',
-                                    marginRight: '0.5rem'
-                                }}
-                            >
-                                <LayoutDashboard size={18} />
-                                <span>Dashboard</span>
-                            </Link>
-                        )}
+                        {(user?.role === 'SELLER' || user?.role === 'ADMIN') &&
+                            !location.pathname.startsWith(user.role === 'ADMIN' ? '/admin' : '/seller/dashboard') && (
+                                <Link
+                                    to={user.role === 'ADMIN' ? "/admin" : "/seller/dashboard"}
+                                    className="btn btn-primary"
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        padding: '0.65rem 1.25rem',
+                                        borderRadius: '999px',
+                                        height: '48px'
+                                    }}
+                                >
+                                    <LayoutDashboard size={18} />
+                                    <span>Dashboard</span>
+                                </Link>
+                            )}
 
-                    {user ? (
-                        <div style={{ position: 'relative' }}>
-                            <button
-                                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                                className="btn btn-secondary icon-btn"
-                                style={{ display: 'flex', gap: '8px', alignItems: 'center', paddingRight: '12px' }}
-                            >
-                                <User size={20} />
-                                <ChevronDown size={16} style={{ marginLeft: '4px' }} />
+                        {user ? (
+                            <div style={{ position: 'relative' }}>
+                                <button
+                                    onClick={() => setIsProfileOpen(!isProfileOpen)}
+                                    className="btn btn-secondary"
+                                    style={{ 
+                                        gap: '12px', 
+                                        borderRadius: '999px',
+                                        padding: '0 0.5rem 0 1.25rem',
+                                        height: '48px'
+                                    }}
+                                >
+                                <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>Account</span>
+                                <div style={{ 
+                                    width: '32px', 
+                                    height: '32px', 
+                                    borderRadius: '50%', 
+                                    background: 'var(--primary)', 
+                                    color: 'white', 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    justifyContent: 'center',
+                                    flexShrink: 0
+                                }}>
+                                    <User size={16} />
+                                </div>
+                                <ChevronDown size={14} style={{ opacity: 0.5, flexShrink: 0 }} />
                             </button>
 
                             {isProfileOpen && (
                                 <div
+                                    className="glass-card animate-fade-in"
                                     style={{
                                         position: 'absolute',
-                                        top: '100%',
+                                        top: '120%',
                                         right: 0,
-                                        marginTop: '8px',
-                                        backgroundColor: 'var(--background)',
-                                        border: '1px solid var(--border)',
-                                        borderRadius: '8px',
-                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
-                                        zIndex: 1001,
                                         minWidth: '280px',
+                                        padding: '0.75rem',
+                                        zIndex: 1001,
                                         overflow: 'hidden'
                                     }}
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     {/* Profile Header */}
                                     <div style={{
-                                        padding: '1rem',
+                                        padding: '1.25rem',
                                         borderBottom: '1px solid var(--border)',
-                                        background: 'hsla(230, 85%, 60%, 0.05)'
+                                        background: 'var(--primary-soft)',
+                                        borderRadius: 'var(--radius-md) var(--radius-md) 0 0',
+                                        marginBottom: '0.5rem'
                                     }}>
                                         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
                                             <div style={{
-                                                width: '40px',
-                                                height: '40px',
+                                                width: '48px',
+                                                height: '48px',
                                                 borderRadius: '50%',
                                                 background: 'var(--primary)',
                                                 display: 'flex',
                                                 alignItems: 'center',
                                                 justifyContent: 'center',
-                                                color: 'white'
+                                                color: 'white',
+                                                boxShadow: '0 4px 10px hsla(230, 85%, 60%, 0.3)'
                                             }}>
-                                                <User size={20} />
+                                                <User size={24} />
                                             </div>
                                             <div>
-                                                <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', margin: 0 }}>Phone Number</p>
-                                                <p style={{ fontSize: '0.95rem', fontWeight: 'bold', margin: '4px 0 0 0' }}>{user.phone}</p>
+                                                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--primary)', margin: 0, textTransform: 'uppercase' }}>{user.role}</p>
+                                                <p style={{ fontSize: '1rem', fontWeight: '800', margin: '2px 0 0 0' }}>{user.phone}</p>
                                             </div>
-                                        </div>
-                                        <div style={{
-                                            fontSize: '0.75rem',
-                                            padding: '6px 8px',
-                                            backgroundColor: 'var(--primary)',
-                                            color: 'white',
-                                            borderRadius: '4px',
-                                            textAlign: 'center',
-                                            textTransform: 'capitalize',
-                                            fontWeight: 'bold'
-                                        }}>
-                                            {user.role}
                                         </div>
                                     </div>
 
                                     {/* Profile Actions */}
-                                    <div style={{ padding: '0.5rem' }}>
+                                    <div className="flex flex-col gap-1">
                                         <button
                                             onClick={() => {
                                                 setIsLoginModalOpen(true);
                                                 setIsProfileOpen(false);
                                             }}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px 12px',
-                                                backgroundColor: 'transparent',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                cursor: 'pointer',
-                                                fontSize: '0.95rem',
-                                                textAlign: 'left',
-                                                color: 'var(--text)',
-                                                transition: 'background-color 0.2s',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '8px'
-                                            }}
-                                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'hsla(230, 85%, 60%, 0.1)'}
-                                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                                            className="btn btn-secondary"
+                                            style={{ width: '100%', justifyContent: 'flex-start', border: 'none', background: 'transparent', boxShadow: 'none' }}
                                         >
-                                            <User size={16} />
-                                            Login as Another User
+                                            <User size={18} />
+                                            <span>Switch Account</span>
                                         </button>
 
                                         <button
                                             onClick={handleSignOut}
-                                            style={{
-                                                width: '100%',
-                                                padding: '10px 12px',
-                                                backgroundColor: 'transparent',
-                                                border: 'none',
-                                                borderRadius: '4px',
-                                                cursor: 'pointer',
-                                                fontSize: '0.95rem',
-                                                textAlign: 'left',
-                                                color: 'var(--danger, #ff6b6b)',
-                                                transition: 'background-color 0.2s',
-                                                display: 'flex',
-                                                alignItems: 'center',
-                                                gap: '8px'
+                                            className="btn btn-secondary"
+                                            style={{ 
+                                                width: '100%', 
+                                                justifyContent: 'flex-start', 
+                                                border: 'none', 
+                                                background: 'transparent', 
+                                                boxShadow: 'none',
+                                                color: 'var(--error)' 
                                             }}
-                                            onMouseEnter={(e) => e.currentTarget.style.backgroundColor = 'hsla(0, 100%, 71%, 0.1)'}
-                                            onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
                                         >
-                                            <LogOut size={16} />
-                                            Sign Out
+                                            <LogOut size={18} />
+                                            <span>Sign Out</span>
                                         </button>
                                     </div>
                                 </div>
@@ -243,18 +240,21 @@ export default function Navbar() {
                     ) : (
                         <button
                             onClick={() => setIsLoginModalOpen(true)}
-                            className="btn btn-secondary icon-btn"
+                            className="btn btn-primary"
+                            style={{ borderRadius: '999px', padding: '0.65rem 1.5rem' }}
                         >
-                            <User size={20} />
+                            <User size={18} />
+                            <span>Login</span>
                         </button>
                     )}
                 </div>
+            </div>
 
                 {/* Mobile Menu Button */}
                 <button
                     className="mobile-only btn btn-secondary icon-btn"
                     onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-                    style={{ padding: '0.5rem' }}
+                    style={{ borderRadius: '999px', width: '48px', height: '48px', padding: 0 }}
                 >
                     {isMobileMenuOpen ? <X size={24} /> : <Menu size={24} />}
                 </button>

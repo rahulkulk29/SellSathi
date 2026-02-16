@@ -7,9 +7,21 @@ const app = express();
 app.use(cors()); // Enable CORS for all routes
 app.use(bodyParser.json());
 
-admin.initializeApp({
-    credential: admin.credential.cert(require("./serviceAccountKey.json")),
-});
+const path = require('path');
+const fs = require('fs');
+
+const keyPath = path.resolve(__dirname, '../serviceAccountKey.json');
+
+if (fs.existsSync(keyPath)) {
+    admin.initializeApp({
+        credential: admin.credential.cert(require(keyPath)),
+    });
+} else {
+    console.error('\n❌ ERROR: serviceAccountKey.json not found!');
+    console.error('Please download it from Firebase Console and place it in the root directory.');
+    console.error('Path expected: ' + keyPath + '\n');
+    process.exit(1);
+}
 
 const db = admin.firestore();
 
