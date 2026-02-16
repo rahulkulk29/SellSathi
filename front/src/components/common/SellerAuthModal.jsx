@@ -72,6 +72,18 @@ export default function SellerAuthModal({ isOpen, onClose, onSuccess }) {
         }
     };
 
+    // Pre-fill phone from localStorage when modal opens
+    useEffect(() => {
+        if (isOpen) {
+            const currentUserPhone = getCurrentUserPhone();
+            if (currentUserPhone) {
+                // Extract last 10 digits for the input field
+                const digits = currentUserPhone.replace(/\D/g, '').slice(-10);
+                setPhone(digits);
+            }
+        }
+    }, [isOpen]);
+
     const handleSendOTP = async (e) => {
         e.preventDefault();
         if (phone.length < 10) {
@@ -81,9 +93,15 @@ export default function SellerAuthModal({ isOpen, onClose, onSuccess }) {
 
         // Check if phone matches the logged-in user's phone
         const currentUserPhone = getCurrentUserPhone();
-        if (currentUserPhone && phone !== currentUserPhone) {
-            setError('Phone number doesn\'t match. Please use the same phone number you used for customer login.');
-            return;
+        if (currentUserPhone) {
+            // Normalize both numbers to 10 digits for accurate comparison
+            const normalizedInput = phone.replace(/\D/g, '').slice(-10);
+            const normalizedStored = currentUserPhone.replace(/\D/g, '').slice(-10);
+
+            if (normalizedInput !== normalizedStored) {
+                setError('Phone number doesn\'t match. Please use the same phone number you used for customer login.');
+                return;
+            }
         }
 
         setLoading(true);
@@ -158,7 +176,7 @@ export default function SellerAuthModal({ isOpen, onClose, onSuccess }) {
                     idToken,
                     sellerDetails: {
                         ...sellerDetails,
-                        phone: phone
+                        phone: `+91${phone}`
                     }
                 }),
             });

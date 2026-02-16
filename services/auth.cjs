@@ -401,10 +401,12 @@ app.post("/auth/test-login", async (req, res) => {
 // GET /admin/stats - Dashboard statistics
 app.get("/admin/stats", async (req, res) => {
     try {
-        const usersSnap = await db.collection("users").get();
-        const sellersSnap = await db.collection("sellers").get();
-        const productsSnap = await db.collection("products").get();
-        const ordersSnap = await db.collection("orders").get();
+        const [usersSnap, sellersSnap, productsSnap, ordersSnap] = await Promise.all([
+            db.collection("users").get(),
+            db.collection("sellers").get(),
+            db.collection("products").get(),
+            db.collection("orders").get()
+        ]);
 
         const totalSellers = usersSnap.docs.filter(doc => doc.data().role === "SELLER").length;
         const pendingSellers = sellersSnap.docs.filter(doc => doc.data().sellerStatus === "PENDING").length;
@@ -434,13 +436,12 @@ app.get("/admin/sellers", async (req, res) => {
     try {
         const sellersSnap = await db.collection("sellers").where("sellerStatus", "==", "PENDING").get();
 
-        const sellers = [];
-        for (const doc of sellersSnap.docs) {
+        const sellers = await Promise.all(sellersSnap.docs.map(async (doc) => {
             const sellerData = doc.data();
             const userSnap = await db.collection("users").doc(doc.id).get();
             const userData = userSnap.data();
 
-            sellers.push({
+            return {
                 uid: doc.id,
                 name: sellerData.shopName,
                 email: userData?.phone || "N/A",
@@ -450,8 +451,8 @@ app.get("/admin/sellers", async (req, res) => {
                 shopName: sellerData.shopName,
                 category: sellerData.category,
                 address: sellerData.address
-            });
-        }
+            };
+        }));
 
         return res.status(200).json({
             success: true,
@@ -471,8 +472,7 @@ app.get("/admin/products", async (req, res) => {
     try {
         const productsSnap = await db.collection("products").get();
 
-        const products = [];
-        for (const doc of productsSnap.docs) {
+        const products = await Promise.all(productsSnap.docs.map(async (doc) => {
             const productData = doc.data();
             let sellerPhone = "System/Seeded";
 
@@ -487,15 +487,15 @@ app.get("/admin/products", async (req, res) => {
                 }
             }
 
-            products.push({
+            return {
                 id: doc.id,
                 title: productData.title || productData.name,
                 seller: sellerPhone,
                 price: productData.price,
                 category: productData.category,
                 status: productData.status || "Active"
-            });
-        }
+            };
+        }));
 
         return res.status(200).json({
             success: true,
@@ -597,19 +597,49 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
 // ========== SELLER ENDPOINTS ==========
 
 // GET /seller/:uid/stats - Seller dashboard statistics
+// GET /seller/:uid/profile - Get seller profile details
+app.get("/seller/:uid/profile", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const [sellerSnap, userSnap] = await Promise.all([
+            db.collection("sellers").doc(uid).get(),
+            db.collection("users").doc(uid).get()
+        ]);
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller profile not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const userData = userSnap.data();
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                shopName: sellerData.shopName,
+                name: userData?.name || sellerData.shopName, // Fallback to shopName if user name not set
+                phone: sellerData.phone,
+                category: sellerData.category,
+                status: sellerData.sellerStatus
+            }
+        });
+    } catch (error) {
+        console.error("GET SELLER PROFILE ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch profile" });
+    }
+});
+
 app.get("/seller/:uid/stats", async (req, res) => {
     try {
         const { uid } = req.params;
 
-        // Products
-        const productsSnap = await db.collection("products").where("sellerId", "==", uid).get();
-        const totalProducts = productsSnap.size;
+        // Fetch products and orders concurrently
+        const [productsSnap, allOrdersSnap] = await Promise.all([
+            db.collection("products").where("sellerId", "==", uid).get(),
+            db.collection("orders").get()
+        ]);
 
-        // Orders (This is simplified. Ideally orders should store sellerId per item or we query subcollections)
-        // For this hackathon scope, we'll scan all orders and filter in code or assume orders structure
-        // Let's assume we search for all orders where items array contains a product with sellerId = uid
-        // Fetching all orders is not scalable but works for small demo
-        const allOrdersSnap = await db.collection("orders").get();
+        const totalProducts = productsSnap.size;
         let totalSales = 0;
         let newOrdersCount = 0;
         let pendingOrdersCount = 0;
@@ -746,10 +776,89 @@ app.delete("/seller/product/:id", async (req, res) => {
 });
 
 // GET /seller/:uid/orders - Get orders for a seller
+// Aggregated Dashboard Data Endpoint (Optimization)
+app.get("/seller/:uid/dashboard-data", async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        // Fetch everything in parallel on the server
+        const [sellerSnap, userSnap, productsSnap, allOrdersSnap, listedProdsSnap] = await Promise.all([
+            db.collection("sellers").doc(uid).get(),
+            db.collection("users").doc(uid).get(),
+            db.collection("products").where("sellerId", "==", uid).get(),
+            db.collection("orders").get(),
+            db.collection("sellers").doc(uid).collection("listedproducts").get()
+        ]);
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller profile not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const userData = userSnap.data();
+
+        // Calculate Stats
+        let totalSales = 0;
+        let newOrdersCount = 0;
+        let pendingOrdersCount = 0;
+        const sellerOrders = [];
+
+        allOrdersSnap.forEach(doc => {
+            const order = doc.data();
+            const sellerItems = order.items?.filter(item => item.sellerId === uid) || [];
+
+            if (sellerItems.length > 0) {
+                const orderSales = sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+                totalSales += orderSales;
+
+                if (order.status === 'Processing') newOrdersCount++;
+                if (order.status === 'Pending') pendingOrdersCount++;
+
+                sellerOrders.push({
+                    id: doc.id,
+                    orderId: order.orderId || doc.id,
+                    customer: order.customerName || "Customer",
+                    items: sellerItems,
+                    total: orderSales,
+                    status: order.status,
+                    date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                });
+            }
+        });
+
+        const products = [];
+        listedProdsSnap.forEach(doc => {
+            products.push({ id: doc.id, ...doc.data() });
+        });
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                shopName: sellerData.shopName,
+                name: userData?.name || sellerData.shopName,
+                phone: sellerData.phone,
+                category: sellerData.category,
+                status: sellerData.sellerStatus
+            },
+            stats: {
+                totalSales,
+                totalProducts: productsSnap.size,
+                newOrders: newOrdersCount,
+                pendingOrders: pendingOrdersCount
+            },
+            products,
+            orders: sellerOrders
+        });
+    } catch (error) {
+        console.error("DASHBOARD DATA ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch dashboard data" });
+    }
+});
+
+// GET /seller/:uid/orders - Get orders for a seller (Legacy support, but optimized)
 app.get("/seller/:uid/orders", async (req, res) => {
     try {
         const { uid } = req.params;
-        // Again, assuming simplified order structure scanning for demo
         const allOrdersSnap = await db.collection("orders").get();
         const sellerOrders = [];
 
@@ -762,7 +871,7 @@ app.get("/seller/:uid/orders", async (req, res) => {
                     id: doc.id,
                     orderId: order.orderId || doc.id,
                     customer: order.customerName || "Customer",
-                    items: sellerItems, // Only show items relevant to this seller
+                    items: sellerItems,
                     total: sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0),
                     status: order.status,
                     date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
@@ -770,16 +879,10 @@ app.get("/seller/:uid/orders", async (req, res) => {
             }
         });
 
-        return res.status(200).json({
-            success: true,
-            orders: sellerOrders
-        });
+        return res.status(200).json({ success: true, orders: sellerOrders });
     } catch (error) {
         console.error("SELLER ORDERS ERROR:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch orders"
-        });
+        return res.status(500).json({ success: false, message: "Failed to fetch orders" });
     }
 });
 
@@ -803,6 +906,38 @@ app.put("/seller/order/:id/status", async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to update order status"
+        });
+    }
+});
+
+// PUT /seller/product/update/:id - Update a product
+app.put("/seller/product/update/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { sellerId, productData } = req.body;
+
+        if (!sellerId || !productData) {
+            return res.status(400).json({ success: false, message: "Missing required update data" });
+        }
+
+        const updatePayload = {
+            ...productData,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+        delete updatePayload.id;
+
+        await db.collection("products").doc(id).update(updatePayload);
+        await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).update(updatePayload);
+
+        return res.status(200).json({
+            success: true,
+            message: "Product updated successfully in all collections"
+        });
+    } catch (error) {
+        console.error("UPDATE PRODUCT ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update product"
         });
     }
 });

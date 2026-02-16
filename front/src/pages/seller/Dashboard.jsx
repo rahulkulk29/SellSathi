@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, DollarSign, Plus, Edit2, Trash2, Truck, Loader, X, Home } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { LayoutDashboard, Package, ShoppingBag, DollarSign, Plus, Edit2, Trash2, Truck, Loader, X, Home, Upload, Eye } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { auth } from '../../config/firebase';
 
 export default function SellerDashboard() {
+    const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('overview');
     const [loading, setLoading] = useState(true);
 
@@ -11,79 +13,87 @@ export default function SellerDashboard() {
     const [stats, setStats] = useState({ totalSales: 0, totalProducts: 0, newOrders: 0, pendingOrders: 0 });
     const [products, setProducts] = useState([]);
     const [orders, setOrders] = useState([]);
+    const [profile, setProfile] = useState({ name: '...', shopName: '' });
 
-    // Modal State
-    const [showAddModal, setShowAddModal] = useState(false);
-    const [newProduct, setNewProduct] = useState({ title: '', price: '', category: '', stock: '', description: '', image: '' });
+    // Modal States
+    const [showViewModal, setShowViewModal] = useState(false);
+    const [selectedProduct, setSelectedProduct] = useState(null);
+    const [isEditing, setIsEditing] = useState(false);
+    const [editData, setEditData] = useState(null);
+    const [updateLoading, setUpdateLoading] = useState(false);
 
     useEffect(() => {
-        const fetchSellerData = async () => {
-            const user = auth.currentUser;
-            if (!user) return; // Should be handled by ProtectedRoute
+        const unsubscribe = auth.onAuthStateChanged(async (user) => {
+            if (!user) {
+                setLoading(false);
+                return;
+            }
 
             try {
                 setLoading(true);
                 const uid = user.uid;
 
-                // Fetch Stats
-                const statsRes = await fetch(`http://localhost:5000/seller/${uid}/stats`);
-                const statsData = await statsRes.json();
-                if (statsData.success) setStats(statsData.stats);
+                // Unified fetch for maximum performance (1 request instead of 4)
+                const response = await fetch(`http://localhost:5000/seller/${uid}/dashboard-data`);
+                const data = await response.json();
 
-                // Fetch Products
-                const prodRes = await fetch(`http://localhost:5000/seller/${uid}/products`);
-                const prodData = await prodRes.json();
-                if (prodData.success) setProducts(prodData.products);
-
-                // Fetch Orders
-                const ordRes = await fetch(`http://localhost:5000/seller/${uid}/orders`);
-                const ordData = await ordRes.json();
-                if (ordData.success) setOrders(ordData.orders);
+                if (data.success) {
+                    setProfile(data.profile);
+                    setStats(data.stats);
+                    setProducts(data.products);
+                    setOrders(data.orders);
+                }
 
             } catch (error) {
                 console.error("Error fetching seller data:", error);
             } finally {
                 setLoading(false);
             }
-        };
+        });
 
-        fetchSellerData();
+        return () => unsubscribe();
     }, []);
 
-    const handleAddProduct = async (e) => {
+
+
+    const handleViewProduct = (product) => {
+        setSelectedProduct(product);
+        setEditData({ ...product });
+        setIsEditing(false);
+        setShowViewModal(true);
+    };
+
+    const handleUpdateProduct = async (e) => {
         e.preventDefault();
         const user = auth.currentUser;
         if (!user) return;
 
+        setUpdateLoading(true);
         try {
-            const response = await fetch('http://localhost:5000/seller/product/add', {
-                method: 'POST',
+            const response = await fetch(`http://localhost:5000/seller/product/update/${selectedProduct.id}`, {
+                method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     sellerId: user.uid,
-                    productData: {
-                        ...newProduct,
-                        price: parseFloat(newProduct.price),
-                        stock: parseInt(newProduct.stock)
-                    }
+                    productData: editData
                 })
             });
 
             const data = await response.json();
             if (data.success) {
-                alert("Product added successfully!");
-                setShowAddModal(false);
-                setNewProduct({ title: '', price: '', category: '', stock: '', description: '', image: '' });
-                // Refresh products
-                const prodRes = await fetch(`http://localhost:5000/seller/${user.uid}/products`);
-                const prodData = await prodRes.json();
-                if (prodData.success) setProducts(prodData.products);
+                alert("Product updated successfully!");
+                setIsEditing(false);
+                setSelectedProduct({ ...editData });
+                // Refresh list
+                setProducts(products.map(p => p.id === selectedProduct.id ? { ...editData, id: p.id } : p));
             } else {
-                alert("Failed: " + data.message);
+                alert("Failed to update: " + data.message);
             }
         } catch (error) {
-            console.error("Error adding product:", error);
-            alert("Error adding product");
+            console.error("Error updating product:", error);
+            alert("Error updating product");
+        } finally {
+            setUpdateLoading(false);
         }
     };
 
@@ -130,7 +140,14 @@ export default function SellerDashboard() {
         { label: 'Pending', value: stats.pendingOrders, icon: <Truck />, color: 'var(--warning)' },
     ];
 
-    if (loading) return <div className="flex justify-center items-center h-screen"><Loader className="animate-spin" /></div>;
+    if (loading) {
+        return (
+            <div className="flex flex-col justify-center items-center h-screen gap-4" style={{ background: 'var(--background)' }}>
+                <Loader className="animate-spin" size={40} color="var(--primary)" />
+                <p style={{ fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.02em' }}>Initializing your dashboard...</p>
+            </div>
+        );
+    }
 
     return (
         <div className="flex" style={{ minHeight: 'calc(100vh - 80px)', width: '100%', gap: '2rem', padding: '2rem' }}>
@@ -189,7 +206,7 @@ export default function SellerDashboard() {
             <div className="flex-1 flex flex-col" style={{ height: '100%', gap: '2rem' }}>
                 <div className="glass-card flex justify-between items-center" style={{ padding: '1.5rem 2rem' }}>
                     <div>
-                        <h2 style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>Welcome back, Seller!</h2>
+                        <h2 style={{ fontSize: '1.8rem', marginBottom: '0.5rem' }}>Welcome back, <span className="gradient-text">{profile.name}</span>!</h2>
                         <p className="text-muted">Here's what's happening with your store today.</p>
                     </div>
                 </div>
@@ -226,7 +243,7 @@ export default function SellerDashboard() {
                     <div className="animate-fade-in flex flex-col gap-4" style={{ height: '100%' }}>
                         <div className="flex justify-between items-center mb-4">
                             <h3>Manage Products ({products.length})</h3>
-                            <button className="btn btn-primary" onClick={() => setShowAddModal(true)} style={{ padding: '0.75rem 1.5rem' }}>
+                            <button className="btn btn-primary" onClick={() => navigate('/seller/add-product')} style={{ padding: '0.75rem 1.5rem' }}>
                                 <Plus size={20} /> Add New Product
                             </button>
                         </div>
@@ -281,6 +298,14 @@ export default function SellerDashboard() {
                                                     </td>
                                                     <td style={{ padding: '1.25rem' }}>
                                                         <div className="flex gap-2">
+                                                            <button
+                                                                className="btn btn-secondary"
+                                                                style={{ padding: '0.5rem', color: 'var(--primary)', borderColor: 'var(--primary)22' }}
+                                                                onClick={() => handleViewProduct(p)}
+                                                                title="See Product Details"
+                                                            >
+                                                                <Eye size={16} />
+                                                            </button>
                                                             <button
                                                                 className="btn btn-secondary"
                                                                 style={{ padding: '0.5rem', color: 'var(--error)', borderColor: 'var(--error)22', background: 'var(--error)11' }}
@@ -374,131 +399,289 @@ export default function SellerDashboard() {
                 )}
             </div>
 
-            {/* Add Product Modal */}
-            {showAddModal && (
-                <div style={{
-                    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000
-                }}>
-                    <div className="glass-card animate-scale-in" style={{ width: '600px', maxHeight: '90vh', overflowY: 'auto', padding: '2rem' }}>
-                        <div className="flex justify-between items-center" style={{ marginBottom: '2rem', borderBottom: '1px solid var(--border)', paddingBottom: '1rem' }}>
-                            <div>
-                                <h3 style={{ fontSize: '1.4rem' }}>Add New Product</h3>
-                                <p className="text-muted" style={{ fontSize: '0.9rem' }}>Fill in the details to list your item.</p>
-                            </div>
-                            <button onClick={() => setShowAddModal(false)} className="btn btn-ghost" style={{ padding: '0.5rem' }}>
-                                <X size={24} />
-                            </button>
-                        </div>
-                        <form onSubmit={handleAddProduct} className="flex flex-col gap-6">
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Title</label>
-                                <input
-                                    type="text" placeholder="e.g. Traditional Hand-Woven Pashmina Shawl" required
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                    value={newProduct.title} onChange={e => setNewProduct({ ...newProduct, title: e.target.value })}
-                                />
-                            </div>
-
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
-                                <div className="form-group">
-                                    <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Price (₹)</label>
-                                    <div className="relative">
-                                        <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 'bold', color: 'var(--primary)' }}>₹</span>
-                                        <input
-                                            type="number" placeholder="0.00" required
-                                            className="input-field"
-                                            style={{ width: '100%', padding: '1rem 1rem 1rem 2.5rem', borderRadius: '12px' }}
-                                            value={newProduct.price} onChange={e => setNewProduct({ ...newProduct, price: e.target.value })}
-                                        />
+            {/* View/Edit Product Modal */}
+            <AnimatePresence>
+                {showViewModal && selectedProduct && (
+                    <div style={{
+                        position: 'fixed', inset: 0, background: 'rgba(5, 5, 15, 0.75)', backdropFilter: 'blur(20px)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '1rem'
+                    }}>
+                        <motion.div
+                            initial={{ opacity: 0, y: 50, scale: 0.95 }}
+                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                            exit={{ opacity: 0, y: 50, scale: 0.95 }}
+                            style={{
+                                width: '100%',
+                                maxWidth: '900px',
+                                maxHeight: '95vh',
+                                overflowY: 'auto',
+                                borderRadius: '28px',
+                                border: '1px solid rgba(255,255,255,0.2)',
+                                background: 'white',
+                                boxShadow: '0 30px 60px -12px rgba(0, 0, 0, 0.25)',
+                                color: 'var(--text)',
+                                position: 'relative'
+                            }}
+                        >
+                            {/* Header Section */}
+                            <div style={{
+                                padding: '2rem 2.5rem',
+                                borderBottom: '1px solid var(--border)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                background: 'linear-gradient(to right, #f8fafc, white)'
+                            }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                                    <div style={{
+                                        padding: '0.75rem',
+                                        background: 'var(--primary)15',
+                                        color: 'var(--primary)',
+                                        borderRadius: '12px'
+                                    }}>
+                                        {isEditing ? <Edit2 size={24} /> : <Eye size={24} />}
+                                    </div>
+                                    <div>
+                                        <h2 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0 }}>
+                                            {isEditing ? 'Editing' : 'Product'} <span className="gradient-text">Details</span>
+                                        </h2>
+                                        <p className="text-muted" style={{ margin: 0 }}>ID: {selectedProduct.id}</p>
                                     </div>
                                 </div>
-                                <div className="form-group">
-                                    <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Stock Status</label>
-                                    <input
-                                        type="number" placeholder="Units available" required
-                                        className="input-field"
-                                        style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                        value={newProduct.stock} onChange={e => setNewProduct({ ...newProduct, stock: e.target.value })}
-                                    />
+                                <div className="flex gap-3">
+                                    {!isEditing && (
+                                        <button
+                                            onClick={() => setIsEditing(true)}
+                                            className="btn btn-primary"
+                                            style={{ padding: '0.75rem 1.5rem', borderRadius: '12px' }}
+                                        >
+                                            <Edit2 size={18} /> Modify Listing
+                                        </button>
+                                    )}
+                                    <button
+                                        onClick={() => setShowViewModal(false)}
+                                        style={{
+                                            padding: '0.75rem',
+                                            borderRadius: '12px',
+                                            background: 'var(--surface)',
+                                            color: 'var(--text-muted)'
+                                        }}
+                                    >
+                                        <X size={20} />
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Category</label>
-                                <select
-                                    required
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                    value={newProduct.category} onChange={e => setNewProduct({ ...newProduct, category: e.target.value })}
-                                >
-                                    <option value="">Select Category</option>
-                                    <option value="Clothing">Clothing</option>
-                                    <option value="Accessories">Accessories</option>
-                                    <option value="Home Decor">Home Decor</option>
-                                    <option value="Art">Art & Crafts</option>
-                                    <option value="Food">Food & Beverages</option>
-                                    <option value="Other">Other</option>
-                                </select>
-                            </div>
-
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Product Image</label>
-                                <div style={{
-                                    border: '2px dashed var(--border)',
-                                    borderRadius: '12px',
-                                    padding: '1.5rem',
-                                    textAlign: 'center',
-                                    background: 'var(--surface)',
-                                    marginBottom: '1rem'
-                                }}>
-                                    <input
-                                        type="text"
-                                        placeholder="Paste image URL here..."
-                                        className="input-field"
-                                        style={{ width: '100%', padding: '0.75rem', marginBottom: '1rem' }}
-                                        value={newProduct.image}
-                                        onChange={e => setNewProduct({ ...newProduct, image: e.target.value })}
-                                    />
-                                    <p className="text-muted" style={{ fontSize: '0.8rem' }}>Please provide a high-quality URL for your product image.</p>
-                                </div>
-                                {newProduct.image && (
-                                    <div style={{ position: 'relative', height: '200px', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
-                                        <img src={newProduct.image} alt="Preview" style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                                            onError={(e) => { e.target.src = 'https://via.placeholder.com/400x200?text=Invalid+Image+URL'; }} />
-                                        <div style={{ position: 'absolute', top: '10px', right: '10px' }}>
-                                            <button
-                                                type="button"
-                                                className="btn btn-secondary icon-btn"
-                                                style={{ background: 'white', color: 'var(--danger)' }}
-                                                onClick={() => setNewProduct({ ...newProduct, image: '' })}
-                                            >
-                                                <Trash2 size={16} />
-                                            </button>
+                            <form onSubmit={handleUpdateProduct} style={{ padding: '2.5rem' }}>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.5fr', gap: '3rem' }}>
+                                    {/* Left Side: Media & Quick Actions */}
+                                    <div className="flex flex-col gap-6">
+                                        <div style={{
+                                            position: 'relative',
+                                            borderRadius: '24px',
+                                            overflow: 'hidden',
+                                            boxShadow: 'var(--shadow-lg)',
+                                            border: '1px solid var(--border)'
+                                        }}>
+                                            <img
+                                                src={isEditing ? editData.image : selectedProduct.image}
+                                                alt={selectedProduct.title}
+                                                style={{ width: '100%', aspectRatio: '1', objectFit: 'cover' }}
+                                                onError={(e) => { e.target.src = 'https://via.placeholder.com/600x600?text=Product+Media'; }}
+                                            />
+                                            {selectedProduct.stock <= 5 && !isEditing && (
+                                                <div style={{
+                                                    position: 'absolute', top: '1rem', left: '1rem',
+                                                    background: 'var(--error)', color: 'white',
+                                                    padding: '0.4rem 0.8rem', borderRadius: '8px',
+                                                    fontSize: '0.75rem', fontWeight: 700, textTransform: 'uppercase'
+                                                }}>
+                                                    Low Stock
+                                                </div>
+                                            )}
                                         </div>
+
+                                        {isEditing && (
+                                            <div style={{ background: 'var(--surface)', padding: '1.25rem', borderRadius: '16px' }}>
+                                                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                                                    <Upload size={14} /> Image URL:
+                                                </label>
+                                                <input
+                                                    type="text"
+                                                    value={editData.image}
+                                                    onChange={e => setEditData({ ...editData, image: e.target.value })}
+                                                    style={{ width: '100%', padding: '0.875rem', borderRadius: '10px', border: '1px solid var(--border)' }}
+                                                    placeholder="Enter new image URL..."
+                                                />
+                                            </div>
+                                        )}
+
+                                        {!isEditing && (
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                                <div style={{ background: 'var(--surface)', padding: '1rem', borderRadius: '16px', textAlign: 'center' }}>
+                                                    <p className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>Status:</p>
+                                                    <p style={{ fontWeight: 600, color: 'var(--success)' }}>Active</p>
+                                                </div>
+                                                <div style={{ background: 'var(--surface)', padding: '1rem', borderRadius: '16px', textAlign: 'center' }}>
+                                                    <p className="text-muted" style={{ fontSize: '0.8rem', marginBottom: '0.25rem' }}>Views:</p>
+                                                    <p style={{ fontWeight: 600 }}>248</p>
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
-                                )}
-                            </div>
 
-                            <div className="form-group">
-                                <label style={{ display: 'block', marginBottom: '0.8rem', fontWeight: 600, color: 'var(--text)' }}>Description</label>
-                                <textarea
-                                    placeholder="Tell customers about your product's craft, material, and uniqueness..." rows="5"
-                                    className="input-field"
-                                    style={{ width: '100%', padding: '1rem', borderRadius: '12px' }}
-                                    value={newProduct.description} onChange={e => setNewProduct({ ...newProduct, description: e.target.value })}
-                                ></textarea>
-                            </div>
+                                    {/* Right Side: Information Form */}
+                                    <div className="flex flex-col gap-6">
+                                        <div className="flex flex-col gap-6">
+                                            {/* Title Field */}
+                                            <div>
+                                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                    Product Title:
+                                                </label>
+                                                {isEditing ? (
+                                                    <input
+                                                        type="text"
+                                                        value={editData.title}
+                                                        onChange={e => setEditData({ ...editData, title: e.target.value })}
+                                                        style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', fontWeight: 600, borderRadius: '12px', border: '1px solid var(--border)' }}
+                                                        required
+                                                    />
+                                                ) : (
+                                                    <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: 'var(--text)', lineHeight: 1.2 }}>
+                                                        {selectedProduct.title}
+                                                    </h3>
+                                                )}
+                                            </div>
 
-                            <div className="flex justify-end gap-3" style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--border)' }}>
-                                <button type="button" onClick={() => setShowAddModal(false)} className="btn btn-secondary">Cancel</button>
-                                <button type="submit" className="btn btn-primary" style={{ minWidth: '120px' }}>Add Product</button>
-                            </div>
-                        </form>
+                                            {/* Details Grid */}
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+                                                <div>
+                                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                        Retail Price:
+                                                    </label>
+                                                    {isEditing ? (
+                                                        <div style={{ position: 'relative' }}>
+                                                            <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--primary)' }}>₹</span>
+                                                            <input
+                                                                type="number"
+                                                                value={editData.price}
+                                                                onChange={e => setEditData({ ...editData, price: e.target.value })}
+                                                                style={{ width: '100%', padding: '0.875rem 0.875rem 0.875rem 2rem', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 600 }}
+                                                                required
+                                                            />
+                                                        </div>
+                                                    ) : (
+                                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)', margin: 0 }}>₹{Number(selectedProduct.price).toLocaleString('en-IN')}</p>
+                                                    )}
+                                                </div>
+                                                <div>
+                                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                        Inventory Level:
+                                                    </label>
+                                                    {isEditing ? (
+                                                        <input
+                                                            type="number"
+                                                            value={editData.stock}
+                                                            onChange={e => setEditData({ ...editData, stock: e.target.value })}
+                                                            style={{ width: '100%', padding: '0.875rem', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 600 }}
+                                                            required
+                                                        />
+                                                    ) : (
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', height: '100%' }}>
+                                                            <p style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{selectedProduct.stock}</p>
+                                                            <span className="text-muted">Units Available</span>
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </div>
+
+                                            {/* Category Field */}
+                                            <div>
+                                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                    Product Category:
+                                                </label>
+                                                {isEditing ? (
+                                                    <select
+                                                        value={editData.category}
+                                                        onChange={e => setEditData({ ...editData, category: e.target.value })}
+                                                        style={{ width: '100%', padding: '0.875rem', borderRadius: '10px', background: 'var(--surface)', border: '1px solid var(--border)', fontWeight: 500 }}
+                                                        required
+                                                    >
+                                                        <option value="Electronics">Electronics</option>
+                                                        <option value="Fashion">Fashion</option>
+                                                        <option value="Home & Kitchen">Home & Kitchen</option>
+                                                        <option value="Handicrafts">Handicrafts</option>
+                                                        <option value="Food & Beverages">Food & Beverages</option>
+                                                        <option value="Beauty & Personal Care">Beauty & Personal Care</option>
+                                                        <option value="Sports & Fitness">Sports & Fitness</option>
+                                                        <option value="Books & Stationery">Books & Stationery</option>
+                                                        <option value="Others">Others</option>
+                                                    </select>
+                                                ) : (
+                                                    <div style={{ display: 'inline-flex', padding: '0.5rem 1rem', background: 'var(--primary)15', color: 'var(--primary)', borderRadius: '8px', fontWeight: 600 }}>
+                                                        {selectedProduct.category}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            {/* Description Field */}
+                                            <div>
+                                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                                                    Product Description:
+                                                </label>
+                                                {isEditing ? (
+                                                    <textarea
+                                                        value={editData.description}
+                                                        onChange={e => setEditData({ ...editData, description: e.target.value })}
+                                                        style={{ width: '100%', padding: '1rem', height: '180px', borderRadius: '12px', border: '1px solid var(--border)', lineHeight: 1.6, fontSize: '1rem' }}
+                                                        placeholder="Describe your product..."
+                                                        required
+                                                    />
+                                                ) : (
+                                                    <p style={{
+                                                        color: 'var(--text)',
+                                                        fontSize: '1rem',
+                                                        lineHeight: 1.7,
+                                                        margin: 0,
+                                                        padding: '1.5rem',
+                                                        background: 'var(--surface)',
+                                                        borderRadius: '16px',
+                                                        border: '1px solid var(--border)',
+                                                        whiteSpace: 'pre-line'
+                                                    }}>
+                                                        {selectedProduct.description}
+                                                    </p>
+                                                )}
+                                            </div>
+                                        </div>
+
+                                        {isEditing && (
+                                            <div className="flex gap-4" style={{ marginTop: 'auto', paddingTop: '2rem' }}>
+                                                <button
+                                                    type="submit"
+                                                    disabled={updateLoading}
+                                                    className="btn btn-primary shadow-glow"
+                                                    style={{ flex: 2, padding: '1rem', borderRadius: '14px', fontSize: '1.1rem' }}
+                                                >
+                                                    {updateLoading ? 'Synchronizing...' : 'Apply Changes'}
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setIsEditing(false)}
+                                                    className="btn btn-secondary"
+                                                    style={{ flex: 1, padding: '1rem', borderRadius: '14px' }}
+                                                >
+                                                    Discard
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </form>
+                        </motion.div>
                     </div>
-                </div>
-            )}
+                )}
+            </AnimatePresence>
         </div>
     );
 }

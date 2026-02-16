@@ -168,6 +168,14 @@ h4 {
   -webkit-text-fill-color: transparent;
 }
 
+.shadow-glow {
+  box-shadow: 0 0 20px hsla(230, 85%, 60%, 0.3);
+}
+
+.shadow-glow:hover {
+  box-shadow: 0 0 30px hsla(230, 85%, 60%, 0.5);
+}
+
 /* Animations */
 @keyframes fadeIn {
   from {
