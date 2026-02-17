@@ -1,0 +1,7 @@
+{
+    "watch": [
+        "."
+    ],
+    "ext": "js,cjs,json,env",
+    "exec": "node auth.cjs"
+}

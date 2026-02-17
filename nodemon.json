@@ -1,0 +1,13 @@
+{
+    "watch": [
+        "services",
+        "back",
+        "routes",
+        "controllers",
+        "models",
+        ".env"
+    ],
+    "ext": "js,cjs,json,env",
+    "exec": "node services/auth.cjs",
+    "delay": "1000"
+}
