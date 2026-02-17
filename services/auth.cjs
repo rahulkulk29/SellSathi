@@ -767,27 +767,48 @@ app.get("/admin/orders", async (req, res) => {
 app.post("/admin/seller/:uid/approve", async (req, res) => {
     try {
         const { uid } = req.params;
+        console.log(`[Admin] Approving seller application for UID: ${uid}`);
 
         const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Seller application record not found"
+            });
+        }
+
+        const sellerData = sellerSnap.data();
+
+        // 1. Update status in sellers collection
         await sellerRef.update({
             sellerStatus: "APPROVED",
             approvedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // 2. Update Role and Verified Data in users collection
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
-            role: "SELLER"
+            role: "SELLER",
+            // Sync verified name from Aadhaar extraction
+            name: sellerData.extractedName || sellerData.shopName,
+            isSeller: true,
+            shopName: sellerData.shopName,
+            verifiedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+
+        console.log(`[Admin] ✅ Seller ${uid} approved and user profile synced.`);
 
         return res.status(200).json({
             success: true,
-            message: "Seller approved successfully"
+            message: "Seller approved successfully. User role and verified profile synced."
         });
     } catch (error) {
         console.error("APPROVE SELLER ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to approve seller"
+            message: "Failed to approve seller: " + error.message
         });
     }
 });
