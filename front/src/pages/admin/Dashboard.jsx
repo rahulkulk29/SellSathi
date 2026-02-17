@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader, Home } from 'lucide-react';
+import { authFetch } from '../../utils/api';
 
 export default function AdminDashboard() {
     const [activeTab, setActiveTab] = useState('sellers');
@@ -24,22 +25,22 @@ export default function AdminDashboard() {
             setError('');
 
             // Fetch stats
-            const statsRes = await fetch('http://localhost:5000/admin/stats');
+            const statsRes = await authFetch('/admin/stats');
             const statsData = await statsRes.json();
             if (statsData.success) setStats(statsData.stats);
 
             // Fetch sellers
-            const sellersRes = await fetch('http://localhost:5000/admin/sellers');
+            const sellersRes = await authFetch('/admin/sellers');
             const sellersData = await sellersRes.json();
             if (sellersData.success) setSellers(sellersData.sellers);
 
             // Fetch products
-            const productsRes = await fetch('http://localhost:5000/admin/products');
+            const productsRes = await authFetch('/admin/products');
             const productsData = await productsRes.json();
             if (productsData.success) setProducts(productsData.products);
 
             // Fetch orders
-            const ordersRes = await fetch('http://localhost:5000/admin/orders');
+            const ordersRes = await authFetch('/admin/orders');
             const ordersData = await ordersRes.json();
             if (ordersData.success) setOrders(ordersData.orders);
         } catch (err) {
@@ -52,9 +53,8 @@ export default function AdminDashboard() {
 
     const handleApproveSeller = async (uid) => {
         try {
-            const response = await fetch(`http://localhost:5000/admin/seller/${uid}/approve`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+            const response = await authFetch(`/admin/seller/${uid}/approve`, {
+                method: 'POST'
             });
             const data = await response.json();
             if (data.success) {
@@ -71,9 +71,8 @@ export default function AdminDashboard() {
 
     const handleRejectSeller = async (uid) => {
         try {
-            const response = await fetch(`http://localhost:5000/admin/seller/${uid}/reject`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' }
+            const response = await authFetch(`/admin/seller/${uid}/reject`, {
+                method: 'POST'
             });
             const data = await response.json();
             if (data.success) {
