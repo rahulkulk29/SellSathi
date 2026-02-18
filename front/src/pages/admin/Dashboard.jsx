@@ -486,6 +486,10 @@ export default function AdminDashboard() {
                                                 <p style={{ fontWeight: 700, margin: 0 }}>{selectedSeller.extractedName || selectedSeller.name}</p>
                                             </div>
                                             <div style={{ background: 'var(--surface)', padding: '0.75rem 1rem', borderRadius: '10px' }}>
+                                                <small className="text-muted mb-1 d-block">UIDAI Number</small>
+                                                <p style={{ fontWeight: 700, margin: 0, fontFamily: 'monospace', letterSpacing: '0.05em' }}>{selectedSeller.aadhaarNumber || 'Not Extracted'}</p>
+                                            </div>
+                                            <div style={{ background: 'var(--surface)', padding: '0.75rem 1rem', borderRadius: '10px', gridColumn: 'span 2' }}>
                                                 <small className="text-muted mb-1 d-block">Age / Gender</small>
                                                 <p style={{ fontWeight: 700, margin: 0 }}>{selectedSeller.age || 'N/A'} | {selectedSeller.gender || 'N/A'}</p>
                                             </div>

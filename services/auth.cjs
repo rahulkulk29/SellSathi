@@ -206,9 +206,10 @@ app.post("/auth/login", async (req, res) => {
             }
 
             if (sellerData.sellerStatus === "REJECTED") {
-                return res.status(403).json({
-                    success: false,
-                    role: "SELLER",
+                return res.status(200).json({
+                    success: true,
+                    uid,
+                    role: "SELLER", // KEEP AS SELLER so they can see the rejection message on dashboard
                     status: "REJECTED",
                     message: "Seller request rejected",
                 });
@@ -826,7 +827,10 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
 
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
-            role: "CONSUMER"
+            // formerly downgraded to CONSUMER, now keeping as SELLER so they can see the message
+            // role: "CONSUMER" 
+            role: "SELLER",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
         return res.status(200).json({
