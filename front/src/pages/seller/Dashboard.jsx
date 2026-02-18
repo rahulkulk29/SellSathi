@@ -432,59 +432,64 @@ export default function SellerDashboard() {
                                     <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                                         <thead style={{ background: '#1e293b', color: 'white', textAlign: 'left' }}>
                                             <tr>
-                                                <th style={{ padding: '1.25rem', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Product Details</th>
-                                                <th style={{ padding: '1.25rem', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Category</th>
-                                                <th style={{ padding: '1.25rem', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Price</th>
-                                                <th style={{ padding: '1.25rem', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Stock</th>
-                                                <th style={{ padding: '1.25rem', fontWeight: 600, fontSize: '0.9rem', letterSpacing: '0.05em', textTransform: 'uppercase' }}>Actions</th>
+                                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Product Details</th>
+                                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Category</th>
+                                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Price</th>
+                                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Stock</th>
+                                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', letterSpacing: '0.05em', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>Actions</th>
                                             </tr>
                                         </thead>
                                         <tbody>
                                             {products.map(p => (
-                                                <tr key={p.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                                                    <td style={{ padding: '1.25rem' }}>
-                                                        <div className="flex items-center gap-4">
+                                                <tr key={p.id}
+                                                    style={{ borderBottom: '1px solid #f1f5f9', background: 'white', transition: 'background 0.15s ease' }}
+                                                    onMouseEnter={e => e.currentTarget.style.background = '#f8fafc'}
+                                                    onMouseLeave={e => e.currentTarget.style.background = 'white'}
+                                                >
+                                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
                                                             {p.image ? (
-                                                                <img src={p.image} style={{ width: '50px', height: '50px', borderRadius: '8px', objectFit: 'cover' }} />
+                                                                <img src={p.image} style={{ width: '52px', height: '52px', borderRadius: '10px', objectFit: 'cover', border: '1px solid #e2e8f0', flexShrink: 0 }} />
                                                             ) : (
-                                                                <div style={{ width: '50px', height: '50px', borderRadius: '8px', background: 'var(--surface)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                                    <Package size={20} className="text-muted" />
+                                                                <div style={{ width: '52px', height: '52px', borderRadius: '10px', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                                                    <Package size={20} style={{ color: '#94a3b8' }} />
                                                                 </div>
                                                             )}
                                                             <div>
-                                                                <p style={{ fontWeight: 600 }}>{p.title}</p>
+                                                                <p style={{ fontWeight: 600, color: '#1e293b', margin: 0, fontSize: '0.95rem' }}>{p.title}</p>
+                                                                <p style={{ color: '#94a3b8', margin: 0, fontSize: '0.78rem', marginTop: '2px' }}>ID: {p.id?.substring(0, 8)}...</p>
                                                             </div>
                                                         </div>
                                                     </td>
-                                                    <td>
-                                                        <span style={{ background: 'var(--surface)', padding: '0.25rem 0.75rem', borderRadius: '20px', fontSize: '0.85rem' }}>
+                                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                                        <span style={{ background: '#f1f5f9', color: '#475569', padding: '0.35rem 0.85rem', borderRadius: '20px', fontSize: '0.82rem', fontWeight: 500, whiteSpace: 'nowrap' }}>
                                                             {p.category}
                                                         </span>
                                                     </td>
-                                                    <td style={{ fontWeight: 600 }}>₹{p.price}</td>
-                                                    <td>
-                                                        <div className="flex items-center gap-2">
-                                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: p.stock > 0 ? 'var(--success)' : 'var(--error)' }}></div>
-                                                            {p.stock || 0} in stock
+                                                    <td style={{ padding: '1.25rem 1.5rem', fontWeight: 700, color: '#1e293b', fontSize: '1rem', whiteSpace: 'nowrap' }}>
+                                                        ₹{Number(p.price).toLocaleString('en-IN')}
+                                                    </td>
+                                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                                            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: p.stock > 0 ? '#22c55e' : '#ef4444', flexShrink: 0 }}></div>
+                                                            <span style={{ color: '#475569', fontSize: '0.9rem', fontWeight: 500 }}>{p.stock || 0} units</span>
                                                         </div>
                                                     </td>
-                                                    <td style={{ padding: '1.25rem' }}>
-                                                        <div className="flex gap-2">
+                                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                                        <div style={{ display: 'flex', gap: '0.5rem' }}>
                                                             <button
-                                                                className="btn btn-secondary"
-                                                                style={{ padding: '0.5rem', color: 'var(--primary)', borderColor: 'var(--primary)22' }}
+                                                                style={{ padding: '0.45rem 1rem', borderRadius: '8px', border: '1px solid #e2e8f0', background: 'white', color: '#3b82f6', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 500 }}
                                                                 onClick={() => handleViewProduct(p)}
-                                                                title="See Product Details"
+                                                                title="View / Edit Product"
                                                             >
-                                                                <Eye size={16} />
+                                                                <Eye size={14} /> View
                                                             </button>
                                                             <button
-                                                                className="btn btn-secondary"
-                                                                style={{ padding: '0.5rem', color: 'var(--error)', borderColor: 'var(--error)22', background: 'var(--error)11' }}
+                                                                style={{ padding: '0.45rem 1rem', borderRadius: '8px', border: '1px solid #fee2e2', background: '#fff5f5', color: '#ef4444', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.82rem', fontWeight: 500 }}
                                                                 onClick={() => handleDeleteProduct(p.id)}
                                                                 title="Delete Product"
                                                             >
-                                                                <Trash2 size={16} />
+                                                                <Trash2 size={14} /> Delete
                                                             </button>
                                                         </div>
                                                     </td>
@@ -703,164 +708,166 @@ export default function SellerDashboard() {
                                     </div>
 
                                     {/* Right Side: Information Form */}
-                                    <div className="flex flex-col gap-6">
-                                        <div className="flex flex-col gap-6">
-                                            {/* Title Field */}
-                                            <div>
-                                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                                    Product Title:
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+
+                                        {/* Title Field */}
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                Product Title
+                                            </label>
+                                            {isEditing ? (
+                                                <input
+                                                    type="text"
+                                                    value={editData.title}
+                                                    onChange={e => setEditData({ ...editData, title: e.target.value })}
+                                                    style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', fontWeight: 600, borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                                                    required
+                                                />
+                                            ) : (
+                                                <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: '#1e293b', lineHeight: 1.2 }}>
+                                                    {selectedProduct.title}
+                                                </h3>
+                                            )}
+                                        </div>
+
+                                        {/* Price Row — fixed 2 columns */}
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                            {/* Retail Price */}
+                                            <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '1rem', border: '1px solid #e2e8f0' }}>
+                                                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, color: '#64748b', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                    Retail Price
                                                 </label>
                                                 {isEditing ? (
-                                                    <input
-                                                        type="text"
-                                                        value={editData.title}
-                                                        onChange={e => setEditData({ ...editData, title: e.target.value })}
-                                                        style={{ width: '100%', padding: '1rem', fontSize: '1.1rem', fontWeight: 600, borderRadius: '12px', border: '1px solid var(--border)' }}
-                                                        required
-                                                    />
-                                                ) : (
-                                                    <h3 style={{ fontSize: '1.75rem', fontWeight: 700, margin: 0, color: 'var(--text)', lineHeight: 1.2 }}>
-                                                        {selectedProduct.title}
-                                                    </h3>
-                                                )}
-                                            </div>
-
-                                            {/* Details Grid */}
-                                            {/* Details Grid: Price, Discount, Stock */}
-                                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '1.5rem' }}>
-                                                {/* Retail Price */}
-                                                <div>
-                                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                                        Retail Price:
-                                                    </label>
-                                                    {isEditing ? (
-                                                        <div style={{ position: 'relative' }}>
-                                                            <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--primary)' }}>₹</span>
-                                                            <input
-                                                                type="number"
-                                                                value={editData.price}
-                                                                onChange={e => setEditData({ ...editData, price: e.target.value })}
-                                                                style={{ width: '100%', padding: '0.875rem 0.875rem 0.875rem 2rem', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 600 }}
-                                                                required
-                                                            />
-                                                        </div>
-                                                    ) : (
-                                                        <p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)', margin: 0 }}>
-                                                            ₹{Number(selectedProduct.price).toLocaleString('en-IN')}
-                                                        </p>
-                                                    )}
-                                                </div>
-
-                                                {/* Discount Price */}
-                                                <div>
-                                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                                        Discount Price <span style={{ fontSize: '0.7em', color: 'var(--success)' }}>(Seasonal)</span>:
-                                                    </label>
-                                                    {isEditing ? (
-                                                        <div style={{ position: 'relative' }}>
-                                                            <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--success)' }}>₹</span>
-                                                            <input
-                                                                type="number"
-                                                                value={editData.discountPrice}
-                                                                onChange={e => setEditData({ ...editData, discountPrice: e.target.value })}
-                                                                placeholder="Optional"
-                                                                style={{ width: '100%', padding: '0.875rem 0.875rem 0.875rem 2rem', borderRadius: '10px', border: '1px solid var(--success)', fontWeight: 600 }}
-                                                            />
-                                                        </div>
-                                                    ) : (
-                                                        selectedProduct.discountPrice ? (
-                                                            <div>
-                                                                <p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--success)', margin: 0 }}>
-                                                                    ₹{Number(selectedProduct.discountPrice).toLocaleString('en-IN')}
-                                                                </p>
-                                                                <small className="text-muted">Seasonal Offer</small>
-                                                            </div>
-                                                        ) : (
-                                                            <p className="text-muted" style={{ fontSize: '0.9rem', fontStyle: 'italic', paddingTop: '0.5rem' }}>No active discount</p>
-                                                        )
-                                                    )}
-                                                </div>
-
-                                                <div>
-                                                    <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                                        Inventory Level:
-                                                    </label>
-                                                    {isEditing ? (
+                                                    <div style={{ position: 'relative' }}>
+                                                        <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: 'var(--primary)' }}>₹</span>
                                                         <input
                                                             type="number"
-                                                            value={editData.stock}
-                                                            onChange={e => setEditData({ ...editData, stock: e.target.value })}
-                                                            style={{ width: '100%', padding: '0.875rem', borderRadius: '10px', border: '1px solid var(--border)', fontWeight: 600 }}
+                                                            value={editData.price}
+                                                            onChange={e => setEditData({ ...editData, price: e.target.value })}
+                                                            style={{ width: '100%', padding: '0.75rem 0.75rem 0.75rem 1.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 600 }}
                                                             required
                                                         />
-                                                    ) : (
-                                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', height: '100%' }}>
-                                                            <p style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>{selectedProduct.stock}</p>
-                                                            <span className="text-muted">Units Available</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {/* Category Field */}
-                                            <div>
-                                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                                    Product Category:
-                                                </label>
-                                                {isEditing ? (
-                                                    <select
-                                                        value={editData.category}
-                                                        onChange={e => setEditData({ ...editData, category: e.target.value })}
-                                                        style={{ width: '100%', padding: '0.875rem', borderRadius: '10px', background: 'var(--surface)', border: '1px solid var(--border)', fontWeight: 500 }}
-                                                        required
-                                                    >
-                                                        <option value="Electronics">Electronics</option>
-                                                        <option value="Fashion">Fashion</option>
-                                                        <option value="Home & Kitchen">Home & Kitchen</option>
-                                                        <option value="Handicrafts">Handicrafts</option>
-                                                        <option value="Food & Beverages">Food & Beverages</option>
-                                                        <option value="Beauty & Personal Care">Beauty & Personal Care</option>
-                                                        <option value="Sports & Fitness">Sports & Fitness</option>
-                                                        <option value="Books & Stationery">Books & Stationery</option>
-                                                        <option value="Others">Others</option>
-                                                    </select>
-                                                ) : (
-                                                    <div style={{ display: 'inline-flex', padding: '0.5rem 1rem', background: 'var(--primary)15', color: 'var(--primary)', borderRadius: '8px', fontWeight: 600 }}>
-                                                        {selectedProduct.category}
                                                     </div>
-                                                )}
-                                            </div>
-
-                                            {/* Description Field */}
-                                            <div>
-                                                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                                                    Product Description:
-                                                </label>
-                                                {isEditing ? (
-                                                    <textarea
-                                                        value={editData.description}
-                                                        onChange={e => setEditData({ ...editData, description: e.target.value })}
-                                                        style={{ width: '100%', padding: '1rem', height: '180px', borderRadius: '12px', border: '1px solid var(--border)', lineHeight: 1.6, fontSize: '1rem' }}
-                                                        placeholder="Describe your product..."
-                                                        required
-                                                    />
                                                 ) : (
-                                                    <p style={{
-                                                        color: 'var(--text)',
-                                                        fontSize: '1rem',
-                                                        lineHeight: 1.7,
-                                                        margin: 0,
-                                                        padding: '1.5rem',
-                                                        background: 'var(--surface)',
-                                                        borderRadius: '16px',
-                                                        border: '1px solid var(--border)',
-                                                        whiteSpace: 'pre-line'
-                                                    }}>
-                                                        {selectedProduct.description}
+                                                    <p style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--primary)', margin: 0 }}>
+                                                        ₹{Number(selectedProduct.price).toLocaleString('en-IN')}
                                                     </p>
                                                 )}
                                             </div>
+
+                                            {/* Discount Price */}
+                                            <div style={{ background: '#f0fdf4', borderRadius: '12px', padding: '1rem', border: '1px solid #bbf7d0' }}>
+                                                <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, color: '#64748b', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                    Discount Price <span style={{ color: '#22c55e' }}>(Seasonal)</span>
+                                                </label>
+                                                {isEditing ? (
+                                                    <div style={{ position: 'relative' }}>
+                                                        <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', fontWeight: 600, color: '#22c55e' }}>₹</span>
+                                                        <input
+                                                            type="number"
+                                                            value={editData.discountPrice}
+                                                            onChange={e => setEditData({ ...editData, discountPrice: e.target.value })}
+                                                            placeholder="Optional"
+                                                            style={{ width: '100%', padding: '0.75rem 0.75rem 0.75rem 1.75rem', borderRadius: '8px', border: '1px solid #bbf7d0', fontWeight: 600 }}
+                                                        />
+                                                    </div>
+                                                ) : (
+                                                    selectedProduct.discountPrice ? (
+                                                        <div>
+                                                            <p style={{ fontSize: '1.5rem', fontWeight: 700, color: '#22c55e', margin: 0 }}>
+                                                                ₹{Number(selectedProduct.discountPrice).toLocaleString('en-IN')}
+                                                            </p>
+                                                            <small style={{ color: '#64748b' }}>Seasonal Offer</small>
+                                                        </div>
+                                                    ) : (
+                                                        <p style={{ fontSize: '0.9rem', fontStyle: 'italic', color: '#94a3b8', margin: 0, paddingTop: '0.25rem' }}>No active discount</p>
+                                                    )
+                                                )}
+                                            </div>
                                         </div>
+
+                                        {/* Stock — own full-width row */}
+                                        <div style={{ background: '#f8fafc', borderRadius: '12px', padding: '1rem', border: '1px solid #e2e8f0' }}>
+                                            <label style={{ display: 'block', marginBottom: '0.4rem', fontWeight: 600, color: '#64748b', fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                Inventory Level
+                                            </label>
+                                            {isEditing ? (
+                                                <input
+                                                    type="number"
+                                                    value={editData.stock}
+                                                    onChange={e => setEditData({ ...editData, stock: e.target.value })}
+                                                    style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', fontWeight: 600 }}
+                                                    required
+                                                />
+                                            ) : (
+                                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: selectedProduct.stock > 0 ? '#22c55e' : '#ef4444', flexShrink: 0 }}></div>
+                                                    <p style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0, color: '#1e293b' }}>{selectedProduct.stock}</p>
+                                                    <span style={{ color: '#64748b', fontSize: '0.9rem' }}>units in stock</span>
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Category Field */}
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                Product Category
+                                            </label>
+                                            {isEditing ? (
+                                                <select
+                                                    value={editData.category}
+                                                    onChange={e => setEditData({ ...editData, category: e.target.value })}
+                                                    style={{ width: '100%', padding: '0.875rem', borderRadius: '10px', background: '#f8fafc', border: '1px solid #e2e8f0', fontWeight: 500 }}
+                                                    required
+                                                >
+                                                    <option value="Electronics">Electronics</option>
+                                                    <option value="Fashion">Fashion</option>
+                                                    <option value="Home & Kitchen">Home & Kitchen</option>
+                                                    <option value="Handicrafts">Handicrafts</option>
+                                                    <option value="Food & Beverages">Food & Beverages</option>
+                                                    <option value="Beauty & Personal Care">Beauty & Personal Care</option>
+                                                    <option value="Sports & Fitness">Sports & Fitness</option>
+                                                    <option value="Books & Stationery">Books & Stationery</option>
+                                                    <option value="Others">Others</option>
+                                                </select>
+                                            ) : (
+                                                <div style={{ display: 'inline-flex', padding: '0.5rem 1.25rem', background: 'rgba(99,102,241,0.1)', color: 'var(--primary)', borderRadius: '8px', fontWeight: 600, fontSize: '0.95rem' }}>
+                                                    {selectedProduct.category}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        {/* Description Field */}
+                                        <div>
+                                            <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600, color: '#64748b', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                                                Product Description
+                                            </label>
+                                            {isEditing ? (
+                                                <textarea
+                                                    value={editData.description}
+                                                    onChange={e => setEditData({ ...editData, description: e.target.value })}
+                                                    style={{ width: '100%', padding: '1rem', height: '160px', borderRadius: '12px', border: '1px solid #e2e8f0', lineHeight: 1.6, fontSize: '1rem', resize: 'vertical' }}
+                                                    placeholder="Describe your product..."
+                                                    required
+                                                />
+                                            ) : (
+                                                <p style={{
+                                                    color: '#334155',
+                                                    fontSize: '0.95rem',
+                                                    lineHeight: 1.7,
+                                                    margin: 0,
+                                                    padding: '1.25rem',
+                                                    background: '#f8fafc',
+                                                    borderRadius: '12px',
+                                                    border: '1px solid #e2e8f0',
+                                                    whiteSpace: 'pre-line'
+                                                }}>
+                                                    {selectedProduct.description}
+                                                </p>
+                                            )}
+                                        </div>
+
+                                        <div style={{ display: 'none' }}>{/* spacer */}</div>
 
                                         {isEditing && (
                                             <div className="flex gap-4" style={{ marginTop: 'auto', paddingTop: '2rem' }}>

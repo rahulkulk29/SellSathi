@@ -14,6 +14,21 @@ const admin = require("firebase-admin");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
+const cloudinary = require('cloudinary').v2;
+const streamifier = require('streamifier');
+
+// Cloudinary Config
+const CLOUDINARY_CLOUD = process.env.CLOUDINARY_CLOUD_NAME || 'dhevauth5';
+const CLOUDINARY_KEY = process.env.CLOUDINARY_API_KEY || '511255263888482';
+const CLOUDINARY_SECRET = process.env.CLOUDINARY_API_SECRET || 'Lct_38d4lRzzsaY78EyB0KyWLDk';
+
+cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD,
+    api_key: CLOUDINARY_KEY,
+    api_secret: CLOUDINARY_SECRET
+});
+console.log(`☁️  Cloudinary configured: cloud_name=${CLOUDINARY_CLOUD}, api_key=${CLOUDINARY_KEY.substring(0, 4)}...`);
+
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
@@ -442,23 +457,38 @@ app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) 
             });
         }
 
-        // 2. Attempt to Upload to Firebase Storage (FULLY ASYNCHRONOUS for latency)
+        // 2. Upload to Cloudinary (Aadhaar Image)
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "aadhaar_cards",
+                        resource_type: "image",
+                        public_id: `aadhaar_${Date.now()}` // Optional: custom ID
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            });
+        };
+
         let imageUrl = "";
-        const bucket = admin.storage().bucket();
-        const fileName = `aadhaar/${Date.now()}-${req.file.originalname}`;
-
-        // We do NOT await this. It runs in the background.
-        bucket.file(fileName).save(req.file.buffer, {
-            metadata: { contentType: req.file.mimetype },
-            public: true
-        }).then(() => {
-            console.log(`[Storage] Background upload complete: ${fileName}`);
-        }).catch(err => {
-            console.warn(`[Storage] Background upload failed: ${err.message}`);
-        });
-
-        // Construct the expected URL ahead of time
-        imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        try {
+            console.log("[Cloudinary] Uploading Aadhaar image...");
+            const cloudResult = await uploadToCloudinary();
+            imageUrl = cloudResult.secure_url;
+            console.log(`[Cloudinary] Upload complete: ${imageUrl}`);
+        } catch (uploadErr) {
+            console.error("[Cloudinary] Upload failed:", uploadErr);
+            return res.status(500).json({
+                success: false,
+                message: "Image upload failed. Please try again.",
+                error: uploadErr.message || "Cloudinary Upload Error"
+            });
+        }
 
         // Calculate Age from DOB
         let age = "N/A";
@@ -498,6 +528,48 @@ app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) 
             message: userMessage,
             error: error.message,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
+// New Endpoint: Generic Image Upload to Cloudinary (for Products, etc.)
+app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No image file provided" });
+        }
+
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "products", // Store in products folder
+                        resource_type: "image"
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            });
+        };
+
+        console.log("[Cloudinary] Uploading product image...");
+        const result = await uploadToCloudinary();
+        console.log(`[Cloudinary] Product image uploaded: ${result.secure_url}`);
+
+        return res.status(200).json({
+            success: true,
+            url: result.secure_url,
+            message: "Image uploaded successfully"
+        });
+
+    } catch (error) {
+        console.error("UPLOAD ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Image upload failed: " + error.message
         });
     }
 });
