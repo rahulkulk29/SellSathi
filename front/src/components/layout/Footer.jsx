@@ -69,11 +69,11 @@ export default function Footer() {
 
                     <div style={{ textAlign: 'right' }}>
                         <h4>Earn with Us</h4>
-                        <div style={{ marginTop: '1rem' }}>
+                        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                             <button
                                 onClick={handleBecomeSellerClick}
                                 className="btn btn-primary"
-                                style={{ cursor: 'pointer' }}
+                                style={{ cursor: 'pointer', width: '100%' }}
                             >
                                 Become a Seller
                             </button>

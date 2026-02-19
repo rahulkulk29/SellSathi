@@ -1,28 +1,41 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Phone, ShieldCheck, ArrowRight } from 'lucide-react';
+import { X, Phone, ShieldCheck, ArrowRight, User as UserIcon, Mail, Lock } from 'lucide-react';
 import { auth } from '../../config/firebase';
 import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 
 const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
-    '+919876543210': { otp: '123456', role: 'CONSUMER' }, // Test consumer number
-    '+917676879059': { otp: '123456', role: 'CONSUMER' }, // Real phone - Test as consumer
-    // Add more test numbers here as needed
+    '+919876543210': { otp: '123456', role: 'CONSUMER' },
+    '+917676879059': { otp: '123456', role: 'CONSUMER' },
 };
 
 export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer' }) {
-    const [step, setStep] = useState('phone'); // 'phone' or 'otp'
+
+    const [step, setStep] = useState('phone');
+    const [isRegistering, setIsRegistering] = useState(false);
     const [phone, setPhone] = useState('');
     const [otp, setOtp] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [confirmationResult, setConfirmationResult] = useState(null);
     const [isTestNumber, setIsTestNumber] = useState(false);
+
+    const [formData, setFormData] = useState({
+        fullName: '',
+        email: '',
+        password: '',
+        confirmPassword: '',
+        agreedToTerms: false,
+        agreedToPrivacy: false
+    });
+
     const navigate = useNavigate();
 
-    // Cleanup function for reCAPTCHA
+    // ---------------------------
+    // 🛡️ Recaptcha Cleanup
+    // ---------------------------
     const cleanupRecaptcha = () => {
         if (window.recaptchaVerifier) {
             try {
@@ -34,236 +47,234 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
         }
     };
 
-    // Cleanup on unmount or when modal closes
     useEffect(() => {
         return () => cleanupRecaptcha();
     }, []);
 
-    // Also cleanup when isOpen changes to false
     useEffect(() => {
         if (!isOpen) {
             cleanupRecaptcha();
+            setStep('phone');
+            setPhone('');
+            setOtp('');
+            setError('');
+            setIsRegistering(false);
         }
     }, [isOpen]);
 
-    // Initialize reCAPTCHA
     const setupRecaptcha = () => {
         cleanupRecaptcha();
-
-        // Create new verifier
         try {
             window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
-                'size': 'invisible',
-                'callback': (response) => {
-                    // reCAPTCHA solved
-                },
+                size: 'invisible',
+                callback: () => { },
                 'expired-callback': () => {
+                    console.warn("reCAPTCHA expired");
                     cleanupRecaptcha();
                 }
             });
         } catch (error) {
-            console.error('Error creating recaptcha verifier:', error);
+            console.error("Recaptcha Init Failed:", error);
             cleanupRecaptcha();
         }
     };
 
+    // ---------------------------
+    // 📲 SEND OTP
+    // ---------------------------
     const handleSendOTP = async (e) => {
-        e.preventDefault();
+
+        if (e) e.preventDefault();
+
         if (phone.length < 10) {
             setError('Please enter a valid 10-digit phone number');
             return;
         }
 
-        const phoneNumber = `+91${phone}`;
-        console.log("=== OTP SEND START ===");
-        console.log("Phone entered:", phone);
-        console.log("Full phone number:", phoneNumber);
-        console.log("Is test credential:", !!TEST_CREDENTIALS[phoneNumber]);
+        if (isRegistering) {
 
-        // FIRST: Check if this is a test number - if yes, skip Firebase entirely
-        if (TEST_CREDENTIALS[phoneNumber]) {
-            console.log("✓ TEST CREDENTIAL DETECTED - Skipping Firebase and reCAPTCHA");
-            setIsTestNumber(true);
-            setStep('otp');
-            setError('');
-            setConfirmationResult({ isTestMode: true });
-            console.log("=== OTP SEND END (TEST MODE) ===");
-            return; // EXIT EARLY - do not proceed to Firebase
+            if (!formData.fullName.trim() || !formData.email.trim() || !formData.password.trim()) {
+                setError('Fill all registration details');
+                return;
+            }
+
+            if (formData.password !== formData.confirmPassword) {
+                setError('Passwords do not match');
+                return;
+            }
+
+            if (!formData.agreedToTerms || !formData.agreedToPrivacy) {
+                setError('Agree to Terms & Privacy Policy');
+                return;
+            }
         }
 
-        // SECOND: Not a test credential - prepare Firebase
-        console.log("✗ Not a test credential - Using Firebase");
-        setIsTestNumber(false);
-        setLoading(true);
+        const phoneNumber = `+91${phone}`;
         setError('');
 
-        try {
-            console.log("Setting up reCAPTCHA...");
-            setupRecaptcha();
+        console.log("OTP SEND START:", phoneNumber);
 
-            // Wait a small tick to ensure verifier is set
-            if (!window.recaptchaVerifier) {
-                console.error("❌ reCAPTCHA Verifier not set immediately after setup!");
-                throw new Error("Recaptcha initialization failed");
-            }
-
-            console.log("✓ reCAPTCHA initialized successfully");
-            const appVerifier = window.recaptchaVerifier;
-
-            console.log("Invoking signInWithPhoneNumber...");
-            const confirmation = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
-            console.log("✓ OTP Sent Successfully!");
-
-            setConfirmationResult(confirmation);
+        if (TEST_CREDENTIALS[phoneNumber]) {
+            console.log("Test Mode Activated");
+            setIsTestNumber(true);
             setStep('otp');
-            setLoading(false);
-            console.log("=== OTP SEND END (FIREBASE MODE) ===");
-        } catch (err) {
-            console.error('❌ Error sending OTP:', err);
-
-            if (err.code === 'auth/invalid-app-credential') {
-                setError('Security verification failed. Please refresh the page.');
-            } else if (err.code === 'auth/too-many-requests') {
-                setError('Too many attempts. Please wait a while.');
-            } else {
-                setError(`Failed to send OTP: ${err.message}`);
-            }
-
-            setLoading(false);
-
-            // Reset reCAPTCHA
-            cleanupRecaptcha();
-            console.log("=== OTP SEND END (ERROR) ===");
-        }
-    };
-
-    const handleVerify = async (e) => {
-        e.preventDefault();
-        if (otp.length !== 6) {
-            setError('Please enter a valid 6-digit OTP');
+            setConfirmationResult({ isTestMode: true });
             return;
         }
 
-        console.log("=== OTP VERIFICATION START ===");
-        console.log("OTP entered:", otp);
-        console.log("Is test mode:", isTestNumber);
+        setIsTestNumber(false);
+        setLoading(true);
+
+        try {
+            setupRecaptcha();
+
+            if (!window.recaptchaVerifier) {
+                throw new Error("Recaptcha not initialized");
+            }
+
+            const confirmation = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+            setConfirmationResult(confirmation);
+            setStep('otp');
+
+        } catch (err) {
+            console.error("OTP Send Error:", err);
+
+            if (err.code === 'auth/too-many-requests') {
+                setError('Too many requests. Try later.');
+            } else if (err.code === 'auth/invalid-app-credential') {
+                setError('Security verification failed.');
+            } else {
+                setError('OTP sending failed.');
+            }
+
+            cleanupRecaptcha();
+        }
+
+        setLoading(false);
+    };
+
+    // ---------------------------
+    // 🔐 VERIFY OTP OR REGISTER
+    // ---------------------------
+    const handleVerifyOrRegister = async (e) => {
+
+        e.preventDefault();
+
+        if (otp.length !== 6) {
+            setError('Enter valid OTP');
+            return;
+        }
 
         setLoading(true);
         setError('');
 
         try {
+
             const phoneNumber = `+91${phone}`;
-            let response;
+            let idToken = null;
 
-            // Handle test mode
-            if (isTestNumber && confirmationResult?.isTestMode) {
-                console.log("✓ TEST MODE VERIFICATION");
-                console.log("Calling /auth/test-login endpoint...");
-                
-                response = await fetch('http://localhost:5000/auth/test-login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ phone: phoneNumber, otp }),
-                });
-                
-                console.log("Response status:", response.status);
-            } else {
-                // Handle real Firebase mode
-                console.log("✗ FIREBASE MODE VERIFICATION");
-                console.log("Confirming with Firebase...");
-                
+            if (!isTestNumber || !confirmationResult?.isTestMode) {
+
+                if (!confirmationResult) {
+                    throw new Error("ConfirmationResult Missing");
+                }
+
                 const result = await confirmationResult.confirm(otp);
-                const user = result.user;
-                const idToken = await user.getIdToken();
-
-                console.log("Calling /auth/login endpoint with Firebase token...");
-                response = await fetch('http://localhost:5000/auth/login', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ idToken }),
-                });
-                
-                console.log("Response status:", response.status);
+                idToken = await result.user.getIdToken();
             }
 
+            const endpoint = isRegistering
+                ? 'http://localhost:5000/auth/register'
+                : (isTestNumber
+                    ? 'http://localhost:5000/auth/test-login'
+                    : 'http://localhost:5000/auth/login');
+
+            const payload = isRegistering
+                ? {
+                    idToken,
+                    phone: phoneNumber,
+                    fullName: formData.fullName,
+                    email: formData.email,
+                    password: formData.password,
+                    isTest: isTestNumber,
+                    otp: isTestNumber ? otp : undefined
+                }
+                : (isTestNumber
+                    ? { phone: phoneNumber, otp }
+                    : { idToken });
+
+            const response = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+
             const data = await response.json();
-            console.log("Backend response:", data);
+
+            console.log("Backend Response:", data);
 
             if (data.success) {
-                // Store user data in localStorage
+
                 const userData = {
                     uid: data.uid,
                     role: data.role,
                     phone: phoneNumber,
                     status: data.status
                 };
+
                 localStorage.setItem('user', JSON.stringify(userData));
-                console.log("✓ User data stored in localStorage:", userData);
 
-                // Dispatch custom event to notify ProtectedRoute of user data change
-                window.dispatchEvent(
-                    new CustomEvent('userDataChanged', {
-                        detail: userData
-                    })
-                );
-                console.log("✓ userDataChanged event dispatched");
+                window.dispatchEvent(new CustomEvent('userDataChanged', {
+                    detail: userData
+                }));
 
-                // Redirect based on role
-                // ADMIN access is restricted to +917483743936 phone number
+                // ADMIN SECURITY
                 if (data.role === 'ADMIN') {
+
                     const ADMIN_PHONE = '+917483743936';
-                    console.log("Admin detected - Checking phone...");
+
                     if (phoneNumber === ADMIN_PHONE) {
-                        console.log("✓ Admin phone matched - Redirecting to /admin");
                         navigate('/admin');
                     } else {
-                        // Security: Non-admin phone trying to access admin
-                        console.error(`❌ SECURITY WARNING: Non-admin phone ${phoneNumber} received ADMIN role`);
-                        setError('Unauthorized admin access');
+                        console.error("Unauthorized Admin Attempt");
                         localStorage.removeItem('user');
+                        setError('Unauthorized admin access');
                         setLoading(false);
                         return;
                     }
-                } else if (data.role === 'SELLER') {
-                    console.log("Seller detected - Checking status:", data.status);
+
+                }
+                else if (data.role === 'SELLER') {
+
                     if (data.status === 'APPROVED') {
-                        console.log("✓ Approved seller - Redirecting to /seller/dashboard");
                         navigate('/seller/dashboard');
-                    } else if (data.status === 'PENDING') {
-                        alert('Your seller application is pending approval');
-                        navigate('/');
-                    } else if (data.status === 'REJECTED') {
-                        alert('Your seller application was rejected');
+                    }
+                    else if (data.status === 'PENDING') {
+                        alert('Seller approval pending');
                         navigate('/');
                     }
-                } else {
-                    // CONSUMER role or any other role
-                    console.log("✓ Consumer detected - Redirecting to /");
+                    else {
+                        alert('Seller rejected');
+                        navigate('/');
+                    }
+                }
+                else {
                     navigate('/');
                 }
 
-                if (onSuccess) {
-                    onSuccess(data);
-                }
-                onClose();
-                console.log("=== OTP VERIFICATION END (SUCCESS) ===");
+                if (onSuccess) onSuccess(data);
+                handleClose();
+
             } else {
-                console.error("❌ Authentication failed:", data.message);
-                setError(data.message || 'Authentication failed');
-                console.log("=== OTP VERIFICATION END (FAILED) ===");
+                setError(data.message || "Authentication Failed");
             }
 
-            setLoading(false);
         } catch (err) {
-            console.error('❌ Error verifying OTP:', err);
-            setError('Invalid OTP. Please try again.');
-            setLoading(false);
-            console.log("=== OTP VERIFICATION END (ERROR) ===");
+            console.error("OTP Verification Error:", err);
+            setError("Invalid OTP");
         }
+
+        setLoading(false);
     };
 
     const handleClose = () => {
@@ -273,6 +284,7 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
         setError('');
         setConfirmationResult(null);
         setIsTestNumber(false);
+        setIsRegistering(false);
         cleanupRecaptcha();
         onClose();
     };
@@ -281,137 +293,239 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
 
     return (
         <AnimatePresence>
-            <div style={{
-                position: 'fixed',
-                inset: 0,
-                backgroundColor: 'rgba(0,0,0,0.5)',
-                backdropFilter: 'blur(4px)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                zIndex: 2000,
-                padding: '1.5rem'
-            }} onClick={handleClose}>
+            <div className="fixed inset-0 z-[2000] flex items-center justify-center p-4">
+                {/* Backdrop */}
                 <motion.div
-                    initial={{ scale: 0.9, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    exit={{ scale: 0.9, opacity: 0 }}
-                    className="glass-card"
-                    style={{
-                        width: '100%',
-                        maxWidth: '400px',
-                        background: 'var(--background)',
-                        position: 'relative',
-                        padding: '2.5rem'
-                    }}
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    onClick={handleClose}
+                    className="absolute inset-0 bg-slate-900/60 backdrop-blur-md"
+                />
+
+                {/* Modal Container */}
+                <motion.div
+                    initial={{ scale: 0.9, opacity: 0, y: 20 }}
+                    animate={{ scale: 1, opacity: 1, y: 0 }}
+                    exit={{ scale: 0.9, opacity: 0, y: 20 }}
+                    className="relative w-full max-w-md bg-white rounded-[2.5rem] shadow-2xl shadow-black/20 overflow-hidden flex flex-col"
                     onClick={e => e.stopPropagation()}
                 >
-                    <button
-                        onClick={handleClose}
-                        style={{ position: 'absolute', top: '1rem', right: '1rem', opacity: 0.5 }}
-                    >
-                        <X size={20} />
-                    </button>
-
-                    <div style={{ textAlign: 'center', marginBottom: '2rem' }}>
-                        <div style={{
-                            width: '60px',
-                            height: '60px',
-                            borderRadius: '50%',
-                            background: 'hsla(230, 85%, 60%, 0.1)',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto 1rem'
-                        }}>
-                            {step === 'phone' ? <Phone color="var(--primary)" /> : <ShieldCheck color="var(--primary)" />}
+                    {/* Header Image/Pattern */}
+                    <div className="h-24 bg-gradient-to-br from-primary to-blue-600 relative overflow-hidden">
+                        <div className="absolute inset-0 opacity-20">
+                            <svg viewBox="0 0 100 100" className="w-full h-full">
+                                <circle cx="10" cy="10" r="20" fill="white" />
+                                <circle cx="90" cy="90" r="30" fill="white" />
+                                <circle cx="50" cy="50" r="25" fill="white" />
+                            </svg>
                         </div>
-                        <h2 style={{ fontSize: '1.5rem' }}>{step === 'phone' ? 'Welcome to ' : 'Verify '} <span className="gradient-text">SELLSATHI</span></h2>
-                        <p className="text-muted" style={{ fontSize: '0.875rem' }}>
-                            {step === 'phone' ? 'Enter your mobile number to get started' : `Enter the 6-digit OTP sent to +91${phone}`}
-                        </p>
+                        <button
+                            onClick={handleClose}
+                            className="absolute top-6 right-6 w-10 h-10 bg-white/20 hover:bg-white text-white hover:text-primary rounded-full flex items-center justify-center transition-all z-10"
+                        >
+                            <X size={20} />
+                        </button>
                     </div>
 
-                    {error && (
-                        <div style={{
-                            padding: '0.75rem',
-                            marginBottom: '1rem',
-                            background: 'rgba(239, 68, 68, 0.1)',
-                            border: '1px solid rgba(239, 68, 68, 0.3)',
-                            borderRadius: '0.5rem',
-                            color: '#ef4444',
-                            fontSize: '0.875rem',
-                            textAlign: 'center'
-                        }}>
-                            {error}
+                    <div className="p-10 -mt-8 bg-white rounded-t-[2.5rem] relative">
+                        <div className="mb-8 text-center">
+                            <div className="w-16 h-16 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-inner">
+                                {step === 'phone' ? <Phone size={30} /> : <ShieldCheck size={30} />}
+                            </div>
+                            <h2 className="text-3xl font-black text-slate-900">
+                                {isRegistering ? 'Join Sellsathi' : (step === 'phone' ? 'Welcome Back' : 'Verify Access')}
+                            </h2>
+                            <p className="text-slate-500 font-medium mt-2">
+                                {isRegistering
+                                    ? 'Start your premium shopping journey'
+                                    : (step === 'phone' ? 'Enter your phone to continue' : 'Enter the 6-digit code sent to you')}
+                            </p>
                         </div>
-                    )}
 
-                    <form onSubmit={step === 'phone' ? handleSendOTP : handleVerify}>
-                        {step === 'phone' ? (
-                            <div className="flex flex-col gap-4">
-                                <div style={{ position: 'relative' }}>
-                                    <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: '600', opacity: 0.7 }}>+91</span>
-                                    <input
-                                        type="tel"
-                                        placeholder="Mobile Number"
-                                        value={phone}
-                                        onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                                        style={{ paddingLeft: '3.5rem', width: '100%' }}
-                                        required
-                                        disabled={loading}
-                                    />
-                                </div>
-                                <button
-                                    type="submit"
-                                    className="btn btn-primary"
-                                    style={{ width: '100%', padding: '1rem' }}
-                                    disabled={phone.length < 10 || loading}
-                                >
-                                    {loading ? 'Sending...' : 'Get OTP'}
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col gap-4">
-                                <input
-                                    type="text"
-                                    placeholder="Enter 6-digit OTP"
-                                    value={otp}
-                                    onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                    style={{ textAlign: 'center', letterSpacing: '0.5rem', fontSize: '1.25rem', fontWeight: 'bold', width: '100%' }}
-                                    required
-                                    disabled={loading}
-                                />
-                                <button
-                                    type="submit"
-                                    className="btn btn-primary"
-                                    style={{ width: '100%', padding: '1rem' }}
-                                    disabled={otp.length < 6 || loading}
-                                >
-                                    {loading ? 'Verifying...' : 'Continue'} {!loading && <ArrowRight size={18} />}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setStep('phone');
-                                        setOtp('');
-                                        setError('');
-                                        setIsTestNumber(false);
-                                    }}
-                                    style={{ fontSize: '0.875rem', color: 'var(--primary)', fontWeight: '600' }}
-                                    disabled={loading}
-                                >
-                                    Change Number
-                                </button>
-                            </div>
+                        {error && (
+                            <motion.div
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                className="bg-red-50 text-red-500 p-4 rounded-xl text-xs font-bold mb-6 flex items-center gap-2 border border-red-100"
+                            >
+                                <X size={14} className="bg-red-500 text-white rounded-full p-0.5" />
+                                {error}
+                            </motion.div>
                         )}
-                    </form>
 
-                    <div id="recaptcha-container"></div>
+                        <form onSubmit={step === 'phone' ? handleSendOTP : handleVerifyOrRegister} className="space-y-4">
+                            {step === 'phone' ? (
+                                <>
+                                    {isRegistering && (
+                                        <div className="space-y-4 mb-6">
+                                            <div className="relative">
+                                                <UserIcon className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                                                <input
+                                                    type="text"
+                                                    placeholder="Your Full Name"
+                                                    value={formData.fullName}
+                                                    onChange={e => setFormData({ ...formData, fullName: e.target.value })}
+                                                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-4 ring-primary/10 transition-all outline-none"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                                                <input
+                                                    type="email"
+                                                    placeholder="Email Address"
+                                                    value={formData.email}
+                                                    onChange={e => setFormData({ ...formData, email: e.target.value })}
+                                                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-4 ring-primary/10 transition-all outline-none"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                                                <input
+                                                    type="password"
+                                                    placeholder="Create Password"
+                                                    value={formData.password}
+                                                    onChange={e => setFormData({ ...formData, password: e.target.value })}
+                                                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-4 ring-primary/10 transition-all outline-none"
+                                                />
+                                            </div>
+                                            <div className="relative">
+                                                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300" size={18} />
+                                                <input
+                                                    type="password"
+                                                    placeholder="Confirm Password"
+                                                    value={formData.confirmPassword}
+                                                    onChange={e => setFormData({ ...formData, confirmPassword: e.target.value })}
+                                                    className="w-full pl-12 pr-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-4 ring-primary/10 transition-all outline-none"
+                                                />
+                                            </div>
+                                            <div className="flex flex-col gap-3 px-1">
+                                                <label className="flex items-center gap-3 cursor-pointer group">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={formData.agreedToTerms}
+                                                        onChange={e => setFormData({ ...formData, agreedToTerms: e.target.checked })}
+                                                        className="w-5 h-5 rounded-lg border-slate-200 text-primary focus:ring-primary/20"
+                                                    />
+                                                    <span className="text-xs text-slate-500 font-medium group-hover:text-slate-700">Agree to Terms & Conditions</span>
+                                                </label>
+                                                <label className="flex items-center gap-3 cursor-pointer group">
+                                                    <input
+                                                        type="checkbox"
+                                                        checked={formData.agreedToPrivacy}
+                                                        onChange={e => setFormData({ ...formData, agreedToPrivacy: e.target.checked })}
+                                                        className="w-5 h-5 rounded-lg border-slate-200 text-primary focus:ring-primary/20"
+                                                    />
+                                                    <span className="text-xs text-slate-500 font-medium group-hover:text-slate-700">Accept Privacy Policy</span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    )}
 
-                    <p style={{ marginTop: '2rem', fontSize: '0.75rem', textAlign: 'center' }} className="text-muted">
-                        By continuing, you agree to our <span style={{ color: 'var(--primary)' }}>Terms of Service</span> and <span style={{ color: 'var(--primary)' }}>Privacy Policy</span>.
-                    </p>
+                                    <div className="relative">
+                                        <div className="absolute left-4 top-1/2 -translate-y-1/2 flex items-center gap-2 pr-3 border-r border-slate-200">
+                                            <span className="text-slate-400 font-bold text-sm">+91</span>
+                                        </div>
+                                        <input
+                                            type="tel"
+                                            placeholder="Phone Number"
+                                            value={phone}
+                                            onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                            className="w-full pl-20 pr-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-4 ring-primary/10 transition-all outline-none text-lg tracking-widest"
+                                        />
+                                    </div>
+
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="w-full bg-primary text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 hover:shadow-xl hover:shadow-primary/20 active:scale-95 transition-all flex items-center justify-center gap-3"
+                                    >
+                                        {loading ? (
+                                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        ) : (
+                                            <>
+                                                {isRegistering ? 'Register & Continue' : 'Verify & Sign In'}
+                                                <ArrowRight size={18} />
+                                            </>
+                                        )}
+                                    </button>
+                                </>
+                            ) : (
+                                <div className="space-y-6">
+                                    <div className="flex justify-between gap-3">
+                                        {[...Array(6)].map((_, i) => (
+                                            <input
+                                                key={i}
+                                                type="text"
+                                                maxLength="1"
+                                                value={otp[i] || ''}
+                                                onChange={(e) => {
+                                                    const val = e.target.value.replace(/\D/g, '');
+                                                    if (val) {
+                                                        const newOtp = otp.split('');
+                                                        newOtp[i] = val;
+                                                        setOtp(newOtp.slice(0, 6).join(''));
+                                                        if (i < 5) {
+                                                            const next = e.target.nextElementSibling;
+                                                            if (next) next.focus();
+                                                        }
+                                                    } else {
+                                                        const newOtp = otp.split('');
+                                                        newOtp[i] = '';
+                                                        setOtp(newOtp.slice(0, 6).join(''));
+                                                    }
+                                                }}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Backspace' && !otp[i] && i > 0) {
+                                                        const prev = e.target.previousElementSibling;
+                                                        if (prev) prev.focus();
+                                                    }
+                                                }}
+                                                className="w-full aspect-square bg-slate-50 border-none rounded-xl text-center text-xl font-black text-slate-900 focus:ring-4 ring-primary/10 transition-all outline-none"
+                                            />
+                                        ))}
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        disabled={loading}
+                                        className="w-full bg-primary text-white py-5 rounded-2xl font-black text-sm uppercase tracking-widest hover:bg-blue-700 hover:shadow-xl hover:shadow-primary/20 active:scale-95 transition-all flex items-center justify-center gap-3"
+                                    >
+                                        {loading ? (
+                                            <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                                        ) : (
+                                            <>Continue to Dashboard <ArrowRight size={18} /></>
+                                        )}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setStep('phone')}
+                                        className="w-full text-slate-400 font-bold text-xs hover:text-primary transition-colors"
+                                    >
+                                        Change Phone Number
+                                    </button>
+                                </div>
+                            )}
+                        </form>
+
+                        <div id="recaptcha-container" className="mt-4"></div>
+
+                        <div className="mt-10 pt-10 border-t border-slate-100 text-center">
+                            <p className="text-sm font-bold text-slate-400">
+                                {isRegistering
+                                    ? "Already part of Sellsathi?"
+                                    : "New here?"}
+                                <button
+                                    onClick={() => {
+                                        setIsRegistering(!isRegistering);
+                                        setError('');
+                                    }}
+                                    className="ml-2 text-primary hover:underline italic"
+                                >
+                                    {isRegistering ? 'Login Now' : 'Create an Account'}
+                                </button>
+                            </p>
+                        </div>
+                    </div>
                 </motion.div>
             </div>
         </AnimatePresence>
