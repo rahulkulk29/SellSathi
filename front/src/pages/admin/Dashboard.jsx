@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader, Home } from 'lucide-react';
+import { ShieldCheck, Users, Box, ShoppingCart, Truck, Check, X, AlertOctagon, Loader, Home, Mail } from 'lucide-react';
 import { authFetch } from '../../utils/api';
 
 export default function AdminDashboard() {
@@ -37,6 +37,10 @@ export default function AdminDashboard() {
 
             // Fetch stats
             const statsRes = await authFetch('/admin/stats');
+            if (!statsRes.ok) {
+                const errText = await statsRes.text();
+                throw new Error(`Admin stats failed (${statsRes.status}): ${errText}`);
+            }
             const statsData = await statsRes.json();
             if (statsData.success) {
                 setStats({
@@ -48,13 +52,17 @@ export default function AdminDashboard() {
             }
 
             // Fetch pending sellers
-            const sellersRes = await fetch('http://localhost:5000/admin/sellers');
+            const sellersRes = await authFetch('/admin/sellers');
+            if (!sellersRes.ok) {
+                const errText = await sellersRes.text();
+                throw new Error(`Admin sellers failed (${sellersRes.status}): ${errText}`);
+            }
             const sellersData = await sellersRes.json();
             if (sellersData.success) setSellers(sellersData.sellers);
 
             // Fetch all sellers (approved + pending) - with fallback
             try {
-                const allSellersRes = await fetch('http://localhost:5000/admin/all-sellers');
+                const allSellersRes = await authFetch('/admin/all-sellers');
                 const allSellersData = await allSellersRes.json();
                 if (allSellersData.success) {
                     setAllSellers(allSellersData.sellers);
@@ -67,11 +75,19 @@ export default function AdminDashboard() {
 
             // Fetch products
             const productsRes = await authFetch('/admin/products');
+            if (!productsRes.ok) {
+                const errText = await productsRes.text();
+                throw new Error(`Admin products failed (${productsRes.status}): ${errText}`);
+            }
             const productsData = await productsRes.json();
             if (productsData.success) setProducts(productsData.products);
 
             // Fetch orders
             const ordersRes = await authFetch('/admin/orders');
+            if (!ordersRes.ok) {
+                const errText = await ordersRes.text();
+                throw new Error(`Admin orders failed (${ordersRes.status}): ${errText}`);
+            }
             const ordersData = await ordersRes.json();
             if (ordersData.success) {
                 setOrders(ordersData.orders);
@@ -84,7 +100,11 @@ export default function AdminDashboard() {
 
             // Fetch total feedback count - with fallback
             try {
-                const reviewsRes = await fetch('http://localhost:5000/admin/reviews');
+                const reviewsRes = await authFetch('/admin/reviews');
+                if (!reviewsRes.ok) {
+                    const errText = await reviewsRes.text();
+                    throw new Error(`Admin reviews failed (${reviewsRes.status}): ${errText}`);
+                }
                 const reviewsData = await reviewsRes.json();
                 if (reviewsData.success) {
                     setReviews(reviewsData.reviews);
@@ -97,7 +117,7 @@ export default function AdminDashboard() {
             }
         } catch (err) {
             console.error('Error fetching data:', err);
-            setError('Failed to load dashboard data. Please refresh.');
+            setError(err?.message || 'Failed to load dashboard data. Please refresh.');
         } finally {
             setLoading(false);
         }
@@ -148,9 +168,8 @@ export default function AdminDashboard() {
         if (!sellerToBlock) return;
 
         try {
-            const response = await fetch(`http://localhost:5000/admin/seller/${sellerToBlock.uid}/block`, {
+            const response = await authFetch(`/admin/seller/${sellerToBlock.uid}/block`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
                     blockDuration: blockDuration === 'permanent' ? 'permanent' : parseInt(blockDuration)
                 })
@@ -1020,20 +1039,19 @@ export default function AdminDashboard() {
         if (!confirmDelete) return;
 
         try {
-            const response = await fetch(`http://localhost:5000/admin/review/${reviewId}`, {
+            const response = await authFetch(`/admin/review/${reviewId}`, {
                 method: 'DELETE',
-                headers: { 'Content-Type': 'application/json' }
             });
             const data = await response.json();
             if (data.success) {
-                alert('✅ Review deleted successfully!');
-                fetchAllData(); // Refresh data
+                alert('Review deleted successfully');
+                fetchAllData();
             } else {
-                alert('❌ Failed to delete review: ' + data.message);
+                alert('Failed to delete review');
             }
         } catch (err) {
             console.error('Error deleting review:', err);
-            alert('❌ Error deleting review. Please try again.');
+            alert('Error deleting review. Please try again.');
         }
     };
 

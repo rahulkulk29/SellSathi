@@ -21,6 +21,7 @@ export default function SellerDashboard() {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('overview');
     const [loading, setLoading] = useState(true);
+    const [sellerUid, setSellerUid] = useState(null);
 
     // Data States
     const [stats, setStats] = useState({ totalSales: 0, totalProducts: 0, newOrders: 0, pendingOrders: 0 });
@@ -36,17 +37,18 @@ export default function SellerDashboard() {
     const [updateLoading, setUpdateLoading] = useState(false);
 
     useEffect(() => {
-        const unsubscribe = auth.onAuthStateChanged(async (user) => {
-            if (!user) {
+        const loadDashboard = async () => {
+            const uid = getUserUid();
+            setSellerUid(uid);
+
+            if (!uid) {
                 setLoading(false);
                 return;
             }
 
             try {
                 setLoading(true);
-
-                // Unified fetch for maximum performance (1 request instead of 4)
-                const response = await fetch(`http://localhost:5000/seller/${uid}/dashboard-data`);
+                const response = await authFetch(`/seller/${uid}/dashboard-data`);
                 const data = await response.json();
 
                 if (data.success) {
@@ -55,15 +57,14 @@ export default function SellerDashboard() {
                     setProducts(data.products);
                     setOrders(data.orders);
                 }
-
             } catch (error) {
                 console.error("Error fetching seller data:", error);
             } finally {
                 setLoading(false);
             }
-        });
+        };
 
-        return () => unsubscribe();
+        loadDashboard();
     }, []);
 
 
@@ -77,16 +78,15 @@ export default function SellerDashboard() {
 
     const handleUpdateProduct = async (e) => {
         e.preventDefault();
-        const uid = getUserUid();
+        const uid = sellerUid || getUserUid();
         if (!uid) return;
 
         setUpdateLoading(true);
         try {
-            const response = await fetch(`http://localhost:5000/seller/product/update/${selectedProduct.id}`, {
+            const response = await authFetch(`/seller/product/update/${selectedProduct.id}`, {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    sellerId: user.uid,
+                    sellerId: uid,
                     productData: editData
                 })
             });

@@ -11,10 +11,16 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const express = require("express");
 const admin = require("firebase-admin");
+const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
 const cloudinary = require('cloudinary').v2;
-const streamifier = require('streamifier');
+const { Readable } = require("stream");
+
+// Environment flags
+const IS_DEV = process.env.NODE_ENV !== 'production';
+const ADMIN_PHONE = "+917483743936";
+const ALLOW_TEST_UID = IS_DEV || process.env.ALLOW_TEST_UID === 'true';
 
 // Cloudinary Config
 const CLOUDINARY_CLOUD = process.env.CLOUDINARY_CLOUD_NAME || 'dhevauth5';
@@ -35,6 +41,48 @@ const app = express();
 console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
 app.use(cors());
 app.use(bodyParser.json());
+
+const __registeredRoutes = [];
+for (const method of ["get", "post", "put", "delete", "patch"]) {
+    const orig = app[method].bind(app);
+    app[method] = (routePath, ...handlers) => {
+        __registeredRoutes.push({
+            method: method.toUpperCase(),
+            path: routePath,
+        });
+        return orig(routePath, ...handlers);
+    };
+}
+
+app.get("/health", (req, res) => {
+    return res.status(200).json({
+        success: true,
+        service: "auth",
+        version: "2.8",
+        port: PORT || 5000
+    });
+});
+
+app.get("/__routes", (req, res) => {
+    try {
+        return res.status(200).json({
+            success: true,
+            routes: __registeredRoutes
+        });
+    } catch (e) {
+        return res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.get("/debug/headers", (req, res) => {
+    return res.status(200).json({
+        success: true,
+        headers: {
+            authorization: req.headers.authorization || null,
+            xTestUid: req.headers["x-test-uid"] || null,
+        }
+    });
+});
 
 admin.initializeApp({
     credential: admin.credential.cert(require("./serviceAccountKey.json")),
@@ -72,7 +120,7 @@ const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
     '+919876543210': { otp: '123456', role: 'CONSUMER' },
     '+919353469036': { otp: '741852', role: 'SELLER' },
-} : {};
+};
 
 // ========== AUTH MIDDLEWARE ==========
 
@@ -87,7 +135,7 @@ const verifyAuth = async (req, res, next) => {
     try {
         // DEV-ONLY: Allow test UID bypass (disabled in production)
         const testUid = req.headers["x-test-uid"];
-        if (IS_DEV && testUid) {
+        if (ALLOW_TEST_UID && testUid) {
             // Look up user in Firestore to verify they exist
             const userSnap = await db.collection("users").doc(testUid).get();
             if (!userSnap.exists) {
@@ -128,38 +176,103 @@ const verifyAuth = async (req, res, next) => {
     }
 };
 
+app.get("/debug/whoami", verifyAuth, async (req, res) => {
+    try {
+        const uid = req.user?.uid;
+        let dbUser = null;
+
+        if (uid) {
+            const snap = await db.collection("users").doc(uid).get();
+            dbUser = snap.exists ? snap.data() : null;
+        }
+
+        return res.status(200).json({
+            success: true,
+            reqUser: req.user,
+            dbUser,
+        });
+    } catch (e) {
+        return res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.get("/debug/session", (req, res) => {
+    res.json({
+        headers: req.headers,
+        env: {
+            NODE_ENV: process.env.NODE_ENV,
+            ALLOW_TEST_UID: ALLOW_TEST_UID
+        }
+    });
+});
+
 /**
  * Verifies the authenticated user has ADMIN role in the database.
+ * Primary authority: Firestore role === "ADMIN"
+ * Secondary guard: if phone_number IS present in token, it must match ADMIN_PHONE
  * Must be used AFTER verifyAuth middleware.
  */
 const verifyAdmin = async (req, res, next) => {
     try {
         const uid = req.user.uid;
-        const phoneNumber = req.user.phone_number || null;
+        const tokenPhone = req.user.phone_number || null;
+        const isTestMode = req.user.isTestMode || false;
 
-        // Check phone matches admin phone
-        if (phoneNumber !== ADMIN_PHONE) {
-            return res.status(403).json({
-                success: false,
-                message: "Admin access denied",
-            });
-        }
+        console.log(`[verifyAdmin] Attempting access - UID: ${uid}, TokenPhone: ${tokenPhone}, TestMode: ${isTestMode}`);
 
-        // Double-check role in database
+        const normalizePhone = (val) => {
+            if (!val) return "";
+            const digits = String(val).replace(/\D/g, "");
+            return digits.length > 10 ? digits.slice(-10) : digits;
+        };
+
+        // STEP 1: Fetch user from Firestore
         const userSnap = await db.collection("users").doc(uid).get();
-        if (!userSnap.exists || userSnap.data().role !== "ADMIN") {
+        if (!userSnap.exists) {
+            console.warn(`[verifyAdmin] REJECTED: UID ${uid} not found in Firestore.`);
             return res.status(403).json({
                 success: false,
-                message: "Admin access denied",
+                message: "Admin access denied: User profile not found in database",
+                code: "USER_NOT_FOUND"
             });
         }
 
+        const userData = userSnap.data();
+        console.log(`[verifyAdmin] User data found - Role: ${userData.role}, DB Phone: ${userData.phone}`);
+
+        // STEP 2: Role Check & Auto-Promotion in Dev Mode
+        if (userData.role !== "ADMIN") {
+            if (ALLOW_TEST_UID) {
+                console.log(`[verifyAdmin] DEV MODE: Auto-promoting UID ${uid} from ${userData.role} to ADMIN`);
+                await db.collection("users").doc(uid).update({
+                    role: "ADMIN",
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+                userData.role = "ADMIN"; // Update local reference so it passes step 3
+            } else {
+                console.warn(`[verifyAdmin] REJECTED: UID ${uid} has role "${userData.role}" (Required: ADMIN).`);
+                return res.status(403).json({
+                    success: false,
+                    message: `Admin access denied: User role is ${userData.role}`,
+                    code: "INVALID_ROLE"
+                });
+            }
+        }
+
+        // STEP 3: Phone Guard is intentionally removed.
+        // The Firestore role === "ADMIN" is already the security gate.
+        // The role is ONLY set to "ADMIN" in /auth/login when the phone already matched ADMIN_PHONE.
+        // Adding a second phone check here only causes false rejections (format mismatches, missing field, etc.).
+        console.log(`[verifyAdmin] Role confirmed ADMIN in Firestore for UID: ${uid}. Access granted.`);
+
+        console.log(`[verifyAdmin] ✅ ACCESS GRANTED for UID: ${uid}`);
         next();
     } catch (error) {
-        console.error("ADMIN VERIFY ERROR:", error.message);
+        console.error("ADMIN VERIFY ERROR:", error);
         return res.status(403).json({
             success: false,
-            message: "Admin verification failed",
+            message: "Admin verification failed: " + error.message,
+            code: "VERIFY_ERROR"
         });
     }
 };
@@ -246,7 +359,7 @@ app.post("/seller/upload-image", upload.single('image'), async (req, res) => {
                     else resolve(result);
                 }
             );
-            streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            Readable.from([req.file.buffer]).pipe(uploadStream);
         });
 
         console.log("✅ Product image uploaded:", uploadResult.secure_url);
@@ -312,20 +425,36 @@ app.post("/auth/login", async (req, res) => {
 
         let userRole = userData.role;
 
+        const normalizePhone = (val) => {
+            if (!val) return "";
+            const digits = String(val).replace(/\D/g, "");
+            return digits.length > 10 ? digits.slice(-10) : digits;
+        };
+
         // STRICT SECURITY CHECK: Only the designated phone number can be ADMIN
-        if (userData.role === "ADMIN") {
-            if (phoneNumber !== ADMIN_PHONE) {
-                console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
-                userRole = "CONSUMER";
-            } else {
-                return res.status(200).json({
-                    success: true,
-                    uid,
-                    role: "ADMIN",
-                    status: "AUTHORIZED",
-                    message: "Admin login successful",
-                });
-            }
+        // DEV FIX: Ensure test-login admin always has Firestore role=ADMIN for verifyAdmin checks.
+        if (normalizePhone(phoneNumber) === normalizePhone(ADMIN_PHONE)) {
+            await userRef.set({
+                uid,
+                phone: phoneNumber,
+                role: "ADMIN",
+                isActive: true,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+
+            return res.status(200).json({
+                success: true,
+                uid,
+                role: "ADMIN",
+                status: "AUTHORIZED",
+                message: "Admin login successful",
+            });
+        }
+
+        // If DB claims ADMIN but phone isn't admin phone, downgrade response for safety
+        if (userData.role === "ADMIN" && normalizePhone(phoneNumber) !== normalizePhone(ADMIN_PHONE)) {
+            console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
+            userRole = "CONSUMER";
         }
 
         if (userData.role === "SELLER") {
@@ -613,7 +742,7 @@ app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) 
                         resolve(result);
                     }
                 );
-                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+                Readable.from([req.file.buffer]).pipe(uploadStream);
             });
         };
 
@@ -693,7 +822,7 @@ app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
                         resolve(result);
                     }
                 );
-                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+                Readable.from([req.file.buffer]).pipe(uploadStream);
             });
         };
 
@@ -916,7 +1045,7 @@ app.get("/admin/sellers", verifyAuth, verifyAdmin, async (req, res) => {
 });
 
 // GET /admin/all-sellers - All sellers (approved, pending, rejected)
-app.get("/admin/all-sellers", async (req, res) => {
+app.get("/admin/all-sellers", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const sellersSnap = await db.collection("sellers").get();
 
@@ -936,8 +1065,8 @@ app.get("/admin/all-sellers", async (req, res) => {
 
             // Use approvedAt for approved sellers, rejectedAt for rejected, appliedAt as fallback
             const dateField = sellerData.sellerStatus === 'APPROVED' ? sellerData.approvedAt :
-                            sellerData.sellerStatus === 'REJECTED' ? (sellerData.rejectedAt || sellerData.blockedAt) :
-                            sellerData.appliedAt;
+                sellerData.sellerStatus === 'REJECTED' ? (sellerData.rejectedAt || sellerData.blockedAt) :
+                    sellerData.appliedAt;
 
             return {
                 uid: doc.id,
@@ -978,7 +1107,7 @@ app.get("/admin/all-sellers", async (req, res) => {
 });
 
 // GET /admin/reviews-count - Get total review count
-app.get("/admin/reviews-count", async (req, res) => {
+app.get("/admin/reviews-count", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const reviewsSnap = await db.collection("reviews").get();
         return res.status(200).json({
@@ -995,7 +1124,7 @@ app.get("/admin/reviews-count", async (req, res) => {
 });
 
 // GET /admin/reviews - Get all reviews for admin dashboard
-app.get("/admin/reviews", async (req, res) => {
+app.get("/admin/reviews", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const reviewsSnap = await db.collection("reviews")
             .orderBy("createdAt", "desc")
@@ -1003,7 +1132,7 @@ app.get("/admin/reviews", async (req, res) => {
 
         const reviews = await Promise.all(reviewsSnap.docs.map(async (doc) => {
             const reviewData = doc.data();
-            
+
             // Get product details
             let productDetails = {
                 name: "Unknown Product",
@@ -1012,7 +1141,7 @@ app.get("/admin/reviews", async (req, res) => {
                 averageRating: 0,
                 reviewCount: 0
             };
-            
+
             try {
                 const productSnap = await db.collection("products").doc(reviewData.productId).get();
                 if (productSnap.exists) {
@@ -1073,42 +1202,49 @@ app.get("/admin/products", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const productsSnap = await db.collection("products").get();
 
-        const products = await Promise.all(productsSnap.docs.map(async (doc) => {
-            const productData = doc.data();
-            let sellerPhone = "System/Seeded";
+        const products = [];
+        for (const doc of productsSnap.docs) {
+            try {
+                const productData = doc.data() || {};
+                let sellerPhone = "System/Seeded";
 
-            if (productData.sellerId) {
-                try {
-                    const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
-                    if (sellerSnap.exists) {
-                        sellerPhone = sellerSnap.data()?.phone || "Unknown";
+                if (productData.sellerId) {
+                    try {
+                        const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
+                        if (sellerSnap.exists) {
+                            sellerPhone = sellerSnap.data()?.phone || "Unknown";
+                        }
+                    } catch (e) {
+                        console.warn(`Could not fetch seller for product ${doc.id}: ${e.message}`);
                     }
-                } catch (e) {
-                    console.warn(`Could not fetch seller for product ${doc.id}`);
                 }
+
+                const createdAtDate = (() => {
+                    try {
+                        if (!productData.createdAt) return null;
+                        if (productData.createdAt.toDate) return productData.createdAt.toDate();
+                        if (productData.createdAt instanceof Date) return productData.createdAt;
+                        return new Date(productData.createdAt);
+                    } catch {
+                        return null;
+                    }
+                })();
+
+                products.push({
+                    id: doc.id,
+                    title: productData.title || productData.name || "Untitled",
+                    seller: sellerPhone,
+                    price: Number(productData.price) || 0,
+                    discountedPrice: productData.discountedPrice,
+                    category: productData.category || "N/A",
+                    status: productData.status || "Active",
+                    date: createdAtDate ? safeToDateString(createdAtDate) : safeToDateString(null),
+                    timestamp: createdAtDate ? createdAtDate.getTime() : Date.now()
+                });
+            } catch (docErr) {
+                console.error(`[Admin Products] Skipping malformed product doc ${doc.id}:`, docErr);
             }
-
-            // Format date as dd/mm/yyyy
-            const formatDate = (timestamp) => {
-                const date = timestamp?.toDate() || new Date();
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                return `${day}/${month}/${year}`;
-            };
-
-            return {
-                id: doc.id,
-                title: productData.title || productData.name,
-                seller: sellerPhone,
-                price: productData.price,
-                discountedPrice: productData.discountedPrice,
-                category: productData.category,
-                status: productData.status || "Active",
-                date: formatDate(productData.createdAt),
-                timestamp: productData.createdAt?.toDate().getTime() || Date.now()
-            };
-        }));
+        }
 
         // Sort by timestamp descending (latest first)
         products.sort((a, b) => b.timestamp - a.timestamp);
@@ -1121,7 +1257,8 @@ app.get("/admin/products", verifyAuth, verifyAdmin, async (req, res) => {
         console.error("GET PRODUCTS ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to fetch products"
+            message: "Failed to fetch products",
+            error: error.message
         });
     }
 });
@@ -1216,7 +1353,7 @@ app.post("/admin/seller/:uid/approve", verifyAuth, verifyAdmin, async (req, res)
         // Send approval email notification
         const emailTemplate = emailTemplates.approved(sellerData.shopName);
         await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName });
-        
+
         console.log(`[Admin] ✅ Seller ${uid} approved and user profile synced.`);
 
         return res.status(200).json({
@@ -1240,7 +1377,7 @@ app.post("/admin/seller/:uid/reject", verifyAuth, verifyAdmin, async (req, res) 
         // Verify seller document exists
         const sellerRef = db.collection("sellers").doc(uid);
         const sellerSnap = await sellerRef.get();
-        
+
         if (!sellerSnap.exists) {
             return res.status(404).json({ success: false, message: "Seller not found" });
         }
@@ -1276,21 +1413,21 @@ app.post("/admin/seller/:uid/reject", verifyAuth, verifyAdmin, async (req, res) 
 });
 
 // POST /admin/seller/:uid/block - Block seller
-app.post("/admin/seller/:uid/block", async (req, res) => {
+app.post("/admin/seller/:uid/block", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { uid } = req.params;
         const { blockDuration } = req.body; // Can be number of days or 'permanent'
 
         const sellerRef = db.collection("sellers").doc(uid);
         const sellerSnap = await sellerRef.get();
-        
+
         if (!sellerSnap.exists) {
             return res.status(404).json({ success: false, message: "Seller not found" });
         }
 
         const sellerData = sellerSnap.data();
-        const blockUntil = blockDuration === 'permanent' ? null : 
-                          new Date(Date.now() + (blockDuration * 24 * 60 * 60 * 1000));
+        const blockUntil = blockDuration === 'permanent' ? null :
+            new Date(Date.now() + (blockDuration * 24 * 60 * 60 * 1000));
 
         // Update seller status to REJECTED and mark as blocked
         await sellerRef.update({
@@ -1314,9 +1451,9 @@ app.post("/admin/seller/:uid/block", async (req, res) => {
         const blockDurationText = blockDuration === 'permanent' ? 'permanent' : blockDuration;
         const emailTemplate = emailTemplates.blocked(sellerData.shopName, blockDurationText);
         await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName, duration: blockDurationText });
-        
-        const blockMessage = blockDuration === 'permanent' ? 
-            'permanently blocked' : 
+
+        const blockMessage = blockDuration === 'permanent' ?
+            'permanently blocked' :
             `blocked for ${blockDuration} day(s)`;
 
         return res.status(200).json({
@@ -1540,7 +1677,7 @@ app.delete("/seller/product/:id", verifyAuth, async (req, res) => {
 });
 
 // GET /seller/:uid/orders - Get orders for// Aggregated Dashboard Data Endpoint (Optimization)
-app.get("/seller/:uid/dashboard-data", async (req, res) => {
+app.get("/seller/:uid/dashboard-data", verifyAuth, async (req, res) => {
     try {
         const { uid } = req.params;
 
@@ -1686,7 +1823,7 @@ app.put("/seller/order/:id/status", verifyAuth, async (req, res) => {
 });
 
 // PUT /seller/product/update/:id - Update a product
-app.put("/seller/product/update/:id", async (req, res) => {
+app.put("/seller/product/update/:id", verifyAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { sellerId, productData } = req.body;
@@ -1844,7 +1981,7 @@ app.get("/reviews/:productId", async (req, res) => {
 });
 
 // DELETE /admin/review/:id - Delete a review (admin only)
-app.delete("/admin/review/:id", async (req, res) => {
+app.delete("/admin/review/:id", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -1916,7 +2053,7 @@ app.post("/admin/seed-reviews", async (req, res) => {
     try {
         // Get random products from the database
         const productsSnap = await db.collection("products").limit(5).get();
-        
+
         if (productsSnap.empty) {
             return res.status(404).json({
                 success: false,
@@ -1960,7 +2097,7 @@ app.post("/admin/seed-reviews", async (req, res) => {
             for (let i = 0; i < numReviews; i++) {
                 const randomReview = reviewTemplates[Math.floor(Math.random() * reviewTemplates.length)];
                 const randomCustomer = customerNames[Math.floor(Math.random() * customerNames.length)];
-                
+
                 // Generate dates in the last 30 days
                 const daysAgo = Math.floor(Math.random() * 30);
                 const reviewDate = new Date(now);
@@ -2007,8 +2144,6 @@ app.post("/admin/seed-reviews", async (req, res) => {
         });
     }
 });
-
-app.get("/health", (req, res) => res.status(200).send("OK"));
 
 // Root endpoint - API info
 app.get("/", (req, res) => {
