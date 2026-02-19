@@ -112,6 +112,51 @@ app.get("/marketplace/products", async (req, res) => {
     }
 });
 
+// ============================================================
+// POST /seller/upload-image — Upload product image to Cloudinary
+// ============================================================
+app.post("/seller/upload-image", upload.single('image'), async (req, res) => {
+    console.log("📸 Product image upload request received");
+
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: "No image file provided" });
+    }
+
+    try {
+        const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {
+                    folder: 'sellsathi/products',
+                    resource_type: 'image',
+                    transformation: [
+                        { width: 1200, height: 1200, crop: 'limit' },
+                        { quality: 'auto:good' },
+                        { fetch_format: 'auto' }
+                    ]
+                },
+                (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
+                }
+            );
+            streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+        });
+
+        console.log("✅ Product image uploaded:", uploadResult.secure_url);
+        return res.status(200).json({
+            success: true,
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id
+        });
+    } catch (error) {
+        console.error("❌ Product image upload error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Image upload failed: " + error.message
+        });
+    }
+});
+
 app.post("/auth/login", async (req, res) => {
     try {
         const { idToken } = req.body;
@@ -1099,19 +1144,18 @@ app.delete("/seller/product/:id", async (req, res) => {
     }
 });
 
-// GET /seller/:uid/orders - Get orders for a seller
-// Aggregated Dashboard Data Endpoint (Optimization)
+// GET /seller/:uid/orders - Get orders for// Aggregated Dashboard Data Endpoint (Optimization)
 app.get("/seller/:uid/dashboard-data", async (req, res) => {
     try {
         const { uid } = req.params;
 
         // Fetch everything in parallel on the server
-        const [sellerSnap, userSnap, productsSnap, allOrdersSnap, listedProdsSnap] = await Promise.all([
+        // Products come from MAIN collection filtered by sellerId (reliable source)
+        const [sellerSnap, userSnap, productsSnap, allOrdersSnap] = await Promise.all([
             db.collection("sellers").doc(uid).get(),
             db.collection("users").doc(uid).get(),
             db.collection("products").where("sellerId", "==", uid).get(),
-            db.collection("orders").get(),
-            db.collection("sellers").doc(uid).collection("listedproducts").get()
+            db.collection("orders").get()
         ]);
 
         if (!sellerSnap.exists) {
@@ -1120,6 +1164,12 @@ app.get("/seller/:uid/dashboard-data", async (req, res) => {
 
         const sellerData = sellerSnap.data();
         const userData = userSnap.data();
+
+        // Build products array from main collection
+        const products = productsSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
 
         // Calculate Stats
         let totalSales = 0;
@@ -1150,10 +1200,7 @@ app.get("/seller/:uid/dashboard-data", async (req, res) => {
             }
         });
 
-        const products = [];
-        listedProdsSnap.forEach(doc => {
-            products.push({ id: doc.id, ...doc.data() });
-        });
+        console.log(`[Dashboard] Seller ${uid}: ${products.length} products found in main collection`);
 
         return res.status(200).json({
             success: true,
@@ -1166,7 +1213,7 @@ app.get("/seller/:uid/dashboard-data", async (req, res) => {
             },
             stats: {
                 totalSales,
-                totalProducts: productsSnap.size,
+                totalProducts: products.length,
                 newOrders: newOrdersCount,
                 pendingOrders: pendingOrdersCount
             },
