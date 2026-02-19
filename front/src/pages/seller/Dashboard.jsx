@@ -21,12 +21,13 @@ export default function SellerDashboard() {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState('overview');
     const [loading, setLoading] = useState(true);
+    const [fetchError, setFetchError] = useState(null);
 
     // Data States
     const [stats, setStats] = useState({ totalSales: 0, totalProducts: 0, newOrders: 0, pendingOrders: 0 });
     const [products, setProducts] = useState([]);
     const [orders, setOrders] = useState([]);
-    const [profile, setProfile] = useState({ name: '...', shopName: '' });
+    const [profile, setProfile] = useState({ name: '...', shopName: '', status: '' });
 
     // Modal States
     const [showViewModal, setShowViewModal] = useState(false);
@@ -38,33 +39,58 @@ export default function SellerDashboard() {
     useEffect(() => {
         const unsubscribe = auth.onAuthStateChanged(async (user) => {
             if (!user) {
-                setLoading(false);
+                // No Firebase user — check if seller is logged in via localStorage (test/fallback)
+                const storedUser = (() => { try { return JSON.parse(localStorage.getItem('user')); } catch { return null; } })();
+                if (!storedUser?.uid) {
+                    setLoading(false);
+                    navigate('/');
+                    return;
+                }
+                // Use stored uid
+                await fetchDashboardData(storedUser.uid);
                 return;
             }
-
-            try {
-                setLoading(true);
-
-                // Unified fetch for maximum performance (1 request instead of 4)
-                const response = await fetch(`http://localhost:5000/seller/${uid}/dashboard-data`);
-                const data = await response.json();
-
-                if (data.success) {
-                    setProfile(data.profile);
-                    setStats(data.stats);
-                    setProducts(data.products);
-                    setOrders(data.orders);
-                }
-
-            } catch (error) {
-                console.error("Error fetching seller data:", error);
-            } finally {
-                setLoading(false);
-            }
+            await fetchDashboardData(user.uid);
         });
 
         return () => unsubscribe();
     }, []);
+
+    const fetchDashboardData = async (uid) => {
+        try {
+            setLoading(true);
+            setFetchError(null);
+            console.log("[Dashboard] Fetching data for seller UID:", uid);
+
+            const response = await fetch(`http://localhost:5000/seller/${uid}/dashboard-data`);
+
+            if (!response.ok) {
+                const errText = await response.text();
+                console.error(`[Dashboard] HTTP ${response.status}:`, errText);
+                setFetchError(`Server error (${response.status}). Make sure the backend is running on port 5000.`);
+                return;
+            }
+
+            const data = await response.json();
+            console.log("[Dashboard] Response:", data);
+
+            if (data.success) {
+                setProfile(data.profile || { name: 'Seller', shopName: '', status: 'APPROVED' });
+                setStats(data.stats || { totalSales: 0, totalProducts: 0, newOrders: 0, pendingOrders: 0 });
+                setProducts(data.products || []);
+                setOrders(data.orders || []);
+            } else {
+                console.error("[Dashboard] API returned failure:", data.message);
+                setFetchError(data.message || 'Failed to fetch seller data.');
+            }
+
+        } catch (error) {
+            console.error("Error fetching seller data:", error);
+            setFetchError('Cannot connect to backend. Make sure the backend server is running on port 5000.');
+        } finally {
+            setLoading(false);
+        }
+    };
 
 
 
@@ -86,7 +112,7 @@ export default function SellerDashboard() {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    sellerId: user.uid,
+                    sellerId: uid,
                     productData: editData
                 })
             });
@@ -156,6 +182,21 @@ export default function SellerDashboard() {
             <div className="flex flex-col justify-center items-center h-screen gap-4" style={{ background: 'var(--background)' }}>
                 <Loader className="animate-spin" size={40} color="var(--primary)" />
                 <p style={{ fontWeight: 600, color: 'var(--text-muted)', letterSpacing: '0.02em' }}>Initializing your dashboard...</p>
+            </div>
+        );
+    }
+
+    if (fetchError) {
+        return (
+            <div className="flex flex-col justify-center items-center h-screen gap-6 p-8 text-center" style={{ background: 'var(--background)' }}>
+                <div style={{ padding: '2rem', background: '#fee2e215', borderRadius: '50%', color: '#ef4444' }}>
+                    <X size={64} />
+                </div>
+                <div>
+                    <h2 style={{ fontSize: '1.75rem', fontWeight: 800, marginBottom: '0.75rem', color: '#1e293b' }}>Data Fetch Error</h2>
+                    <p style={{ fontSize: '1rem', color: '#64748b', maxWidth: '500px', lineHeight: 1.6 }}>{fetchError}</p>
+                </div>
+                <button onClick={() => window.location.reload()} className="btn btn-primary" style={{ marginTop: '1rem' }}>Retry</button>
             </div>
         );
     }

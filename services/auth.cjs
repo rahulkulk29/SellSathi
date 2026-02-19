@@ -33,7 +33,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const app = express();
 console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
 admin.initializeApp({
     credential: admin.credential.cert(require("./serviceAccountKey.json")),
@@ -71,7 +71,7 @@ const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
     '+919876543210': { otp: '123456', role: 'CONSUMER' },
     '+919353469036': { otp: '741852', role: 'SELLER' },
-} : {};
+};
 
 // ========== AUTH MIDDLEWARE ==========
 
