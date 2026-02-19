@@ -15,6 +15,7 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { sendEmail, emailTemplates } = require("./emailService");
 
 const app = express();
 console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
@@ -659,13 +660,23 @@ app.get("/admin/sellers", async (req, res) => {
             const userSnap = await db.collection("users").doc(doc.id).get();
             const userData = userSnap.data();
 
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
+
             return {
                 uid: doc.id,
                 name: sellerData.shopName,
                 email: userData?.phone || "N/A",
                 type: "Individual",
                 status: sellerData.sellerStatus,
-                joined: sellerData.appliedAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0],
+                joined: formatDate(sellerData.appliedAt),
+                timestamp: sellerData.appliedAt?.toDate().getTime() || Date.now(), // For sorting
                 shopName: sellerData.shopName,
                 category: sellerData.category,
                 address: sellerData.address,
@@ -677,6 +688,9 @@ app.get("/admin/sellers", async (req, res) => {
             };
         }));
 
+        // Sort by timestamp descending (latest first)
+        sellers.sort((a, b) => b.timestamp - a.timestamp);
+
         return res.status(200).json({
             success: true,
             sellers
@@ -686,6 +700,159 @@ app.get("/admin/sellers", async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to fetch sellers"
+        });
+    }
+});
+
+// GET /admin/all-sellers - All sellers (approved, pending, rejected)
+app.get("/admin/all-sellers", async (req, res) => {
+    try {
+        const sellersSnap = await db.collection("sellers").get();
+
+        const sellers = await Promise.all(sellersSnap.docs.map(async (doc) => {
+            const sellerData = doc.data();
+            const userSnap = await db.collection("users").doc(doc.id).get();
+            const userData = userSnap.data();
+
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
+
+            // Use approvedAt for approved sellers, rejectedAt for rejected, appliedAt as fallback
+            const dateField = sellerData.sellerStatus === 'APPROVED' ? sellerData.approvedAt :
+                            sellerData.sellerStatus === 'REJECTED' ? (sellerData.rejectedAt || sellerData.blockedAt) :
+                            sellerData.appliedAt;
+
+            return {
+                uid: doc.id,
+                name: sellerData.shopName,
+                email: userData?.phone || "N/A",
+                type: "Individual",
+                status: sellerData.sellerStatus,
+                joined: formatDate(dateField),
+                timestamp: dateField?.toDate().getTime() || Date.now(), // For sorting
+                shopName: sellerData.shopName,
+                category: sellerData.category,
+                address: sellerData.address,
+                // Aadhaar Data
+                aadhaarNumber: sellerData.aadhaarNumber,
+                age: sellerData.age,
+                aadhaarImageUrl: sellerData.aadhaarImageUrl,
+                extractedName: sellerData.extractedName,
+                // Block info
+                isBlocked: sellerData.isBlocked || false,
+                blockDuration: sellerData.blockDuration
+            };
+        }));
+
+        // Sort by timestamp descending (latest first)
+        sellers.sort((a, b) => b.timestamp - a.timestamp);
+
+        return res.status(200).json({
+            success: true,
+            sellers
+        });
+    } catch (error) {
+        console.error("GET ALL SELLERS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch all sellers"
+        });
+    }
+});
+
+// GET /admin/reviews-count - Get total review count
+app.get("/admin/reviews-count", async (req, res) => {
+    try {
+        const reviewsSnap = await db.collection("reviews").get();
+        return res.status(200).json({
+            success: true,
+            count: reviewsSnap.size
+        });
+    } catch (error) {
+        console.error("GET REVIEWS COUNT ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reviews count"
+        });
+    }
+});
+
+// GET /admin/reviews - Get all reviews for admin dashboard
+app.get("/admin/reviews", async (req, res) => {
+    try {
+        const reviewsSnap = await db.collection("reviews")
+            .orderBy("createdAt", "desc")
+            .get();
+
+        const reviews = await Promise.all(reviewsSnap.docs.map(async (doc) => {
+            const reviewData = doc.data();
+            
+            // Get product details
+            let productDetails = {
+                name: "Unknown Product",
+                category: "N/A",
+                brand: "N/A",
+                averageRating: 0,
+                reviewCount: 0
+            };
+            
+            try {
+                const productSnap = await db.collection("products").doc(reviewData.productId).get();
+                if (productSnap.exists) {
+                    const productData = productSnap.data();
+                    productDetails = {
+                        name: productData.title || productData.name,
+                        category: productData.category || "N/A",
+                        brand: productData.brand || "N/A",
+                        averageRating: productData.averageRating || 0,
+                        reviewCount: productData.reviewCount || 0
+                    };
+                }
+            } catch (err) {
+                console.warn(`Could not fetch product for review ${doc.id}`);
+            }
+
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
+
+            return {
+                id: doc.id,
+                productId: reviewData.productId,
+                productName: productDetails.name,
+                productCategory: productDetails.category,
+                productBrand: productDetails.brand,
+                productAvgRating: productDetails.averageRating,
+                productReviewCount: productDetails.reviewCount,
+                customerName: reviewData.userName || "Anonymous",
+                customerId: reviewData.userId || "N/A",
+                rating: reviewData.rating,
+                feedback: reviewData.feedback,
+                date: formatDate(reviewData.createdAt),
+                timestamp: reviewData.createdAt?.toDate().getTime() || Date.now()
+            };
+        }));
+
+        return res.status(200).json({
+            success: true,
+            reviews
+        });
+    } catch (error) {
+        console.error("GET ADMIN REVIEWS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reviews"
         });
     }
 });
@@ -710,15 +877,30 @@ app.get("/admin/products", async (req, res) => {
                 }
             }
 
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
+
             return {
                 id: doc.id,
                 title: productData.title || productData.name,
                 seller: sellerPhone,
                 price: productData.price,
+                discountedPrice: productData.discountedPrice,
                 category: productData.category,
-                status: productData.status || "Active"
+                status: productData.status || "Active",
+                date: formatDate(productData.createdAt),
+                timestamp: productData.createdAt?.toDate().getTime() || Date.now()
             };
         }));
+
+        // Sort by timestamp descending (latest first)
+        products.sort((a, b) => b.timestamp - a.timestamp);
 
         return res.status(200).json({
             success: true,
@@ -738,6 +920,21 @@ app.get("/admin/orders", async (req, res) => {
     try {
         const ordersSnap = await db.collection("orders").get();
 
+        // Helper function to format date as dd/mm/yyyy
+        const formatDate = (timestamp) => {
+            const date = timestamp?.toDate() || new Date();
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        };
+
+        // Helper function to normalize status
+        const normalizeStatus = (status) => {
+            if (status === 'Placed') return 'Order Placed';
+            return status || 'Order Placed';
+        };
+
         const orders = [];
         for (const doc of ordersSnap.docs) {
             const orderData = doc.data();
@@ -746,10 +943,14 @@ app.get("/admin/orders", async (req, res) => {
                 orderId: orderData.orderId || doc.id,
                 customer: orderData.customerName || "Unknown",
                 total: orderData.total || 0,
-                status: orderData.status || "Processing",
-                date: orderData.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                status: normalizeStatus(orderData.status),
+                date: formatDate(orderData.createdAt),
+                timestamp: orderData.createdAt?.toDate().getTime() || Date.now() // For sorting
             });
         }
+
+        // Sort by timestamp descending (latest first)
+        orders.sort((a, b) => b.timestamp - a.timestamp);
 
         return res.status(200).json({
             success: true,
@@ -795,15 +996,20 @@ app.post("/admin/seller/:uid/approve", async (req, res) => {
             // Sync verified name from Aadhaar extraction
             name: sellerData.extractedName || sellerData.shopName,
             isSeller: true,
+            isActive: true,
             shopName: sellerData.shopName,
             verifiedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // Send approval email notification
+        const emailTemplate = emailTemplates.approved(sellerData.shopName);
+        await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName });
+        
         console.log(`[Admin] ✅ Seller ${uid} approved and user profile synced.`);
 
         return res.status(200).json({
             success: true,
-            message: "Seller approved successfully. User role and verified profile synced."
+            message: "Seller approved successfully. Email notification sent."
         });
     } catch (error) {
         console.error("APPROVE SELLER ERROR:", error);
@@ -820,6 +1026,14 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
         const { uid } = req.params;
 
         const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+        
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+
         await sellerRef.update({
             sellerStatus: "REJECTED",
             rejectedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -827,21 +1041,80 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
 
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
-            // formerly downgraded to CONSUMER, now keeping as SELLER so they can see the message
-            // role: "CONSUMER" 
             role: "SELLER",
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // Send rejection email notification
+        const emailTemplate = emailTemplates.rejected(sellerData.shopName);
+        await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName });
+
         return res.status(200).json({
             success: true,
-            message: "Seller rejected successfully"
+            message: "Seller rejected successfully. Email notification sent."
         });
     } catch (error) {
         console.error("REJECT SELLER ERROR:", error);
         return res.status(500).json({
             success: false,
             message: "Failed to reject seller"
+        });
+    }
+});
+
+// POST /admin/seller/:uid/block - Block seller
+app.post("/admin/seller/:uid/block", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { blockDuration } = req.body; // Can be number of days or 'permanent'
+
+        const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+        
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const blockUntil = blockDuration === 'permanent' ? null : 
+                          new Date(Date.now() + (blockDuration * 24 * 60 * 60 * 1000));
+
+        // Update seller status to REJECTED and mark as blocked
+        await sellerRef.update({
+            sellerStatus: "REJECTED", // Mark as rejected so they appear in rejected section
+            isBlocked: true,
+            blockDuration: blockDuration === 'permanent' ? 'permanent' : blockDuration,
+            blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+            blockUntil: blockUntil,
+            blockReason: "Blocked by admin",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const userRef = db.collection("users").doc(uid);
+        await userRef.update({
+            isActive: false,
+            isBlocked: true,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Send block notification email
+        const blockDurationText = blockDuration === 'permanent' ? 'permanent' : blockDuration;
+        const emailTemplate = emailTemplates.blocked(sellerData.shopName, blockDurationText);
+        await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName, duration: blockDurationText });
+        
+        const blockMessage = blockDuration === 'permanent' ? 
+            'permanently blocked' : 
+            `blocked for ${blockDuration} day(s)`;
+
+        return res.status(200).json({
+            success: true,
+            message: `Seller ${blockMessage}. Email notification sent.`
+        });
+    } catch (error) {
+        console.error("BLOCK SELLER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to block seller"
         });
     }
 });
@@ -1194,7 +1467,345 @@ app.put("/seller/product/update/:id", async (req, res) => {
     }
 });
 
+// ========== REVIEW ENDPOINTS ==========
+
+// POST /reviews/add - Submit a product review
+app.post("/reviews/add", async (req, res) => {
+    try {
+        const { idToken, reviewData } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({
+                success: false,
+                message: "ID token is required"
+            });
+        }
+
+        if (!reviewData || !reviewData.productId || !reviewData.rating || !reviewData.feedback) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing required fields: productId, rating, and feedback are required"
+            });
+        }
+
+        // Verify user authentication
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const uid = decodedToken.uid;
+
+        // Get user details
+        const userSnap = await db.collection("users").doc(uid).get();
+        if (!userSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        const userData = userSnap.data();
+
+        // Validate rating (1-5)
+        const rating = parseInt(reviewData.rating);
+        if (rating < 1 || rating > 5) {
+            return res.status(400).json({
+                success: false,
+                message: "Rating must be between 1 and 5"
+            });
+        }
+
+        // Create review document
+        const reviewRef = await db.collection("reviews").add({
+            productId: reviewData.productId,
+            userId: uid,
+            userName: userData.name || userData.phone || "Anonymous",
+            rating: rating,
+            feedback: reviewData.feedback,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Update product's average rating and review count
+        const productRef = db.collection("products").doc(reviewData.productId);
+        const productSnap = await productRef.get();
+
+        if (productSnap.exists) {
+            const productData = productSnap.data();
+            const currentReviewCount = productData.reviewCount || 0;
+            const currentAvgRating = productData.averageRating || 0;
+
+            // Calculate new average rating
+            const newReviewCount = currentReviewCount + 1;
+            const newAvgRating = ((currentAvgRating * currentReviewCount) + rating) / newReviewCount;
+
+            await productRef.update({
+                averageRating: parseFloat(newAvgRating.toFixed(1)),
+                reviewCount: newReviewCount,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Review submitted successfully",
+            reviewId: reviewRef.id
+        });
+
+    } catch (error) {
+        console.error("ADD REVIEW ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to submit review"
+        });
+    }
+});
+
+// GET /reviews/:productId - Get all reviews for a product
+app.get("/reviews/:productId", async (req, res) => {
+    try {
+        const { productId } = req.params;
+
+        const reviewsSnap = await db.collection("reviews")
+            .where("productId", "==", productId)
+            .orderBy("createdAt", "desc")
+            .get();
+
+        const reviews = [];
+        reviewsSnap.forEach(doc => {
+            const reviewData = doc.data();
+            reviews.push({
+                id: doc.id,
+                user: reviewData.userName,
+                rating: reviewData.rating,
+                feedback: reviewData.feedback,
+                date: reviewData.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+            });
+        });
+
+        return res.status(200).json({
+            success: true,
+            reviews
+        });
+
+    } catch (error) {
+        console.error("GET REVIEWS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reviews"
+        });
+    }
+});
+
+// DELETE /admin/review/:id - Delete a review (admin only)
+app.delete("/admin/review/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Get review to update product stats
+        const reviewRef = db.collection("reviews").doc(id);
+        const reviewSnap = await reviewRef.get();
+
+        if (!reviewSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Review not found"
+            });
+        }
+
+        const reviewData = reviewSnap.data();
+        const productId = reviewData.productId;
+        const rating = reviewData.rating;
+
+        // Delete the review
+        await reviewRef.delete();
+
+        // Update product's average rating and review count
+        const productRef = db.collection("products").doc(productId);
+        const productSnap = await productRef.get();
+
+        if (productSnap.exists) {
+            const productData = productSnap.data();
+            const currentReviewCount = productData.reviewCount || 0;
+            const currentAvgRating = productData.averageRating || 0;
+
+            if (currentReviewCount > 1) {
+                // Recalculate average rating
+                const totalRating = currentAvgRating * currentReviewCount;
+                const newTotalRating = totalRating - rating;
+                const newReviewCount = currentReviewCount - 1;
+                const newAvgRating = newTotalRating / newReviewCount;
+
+                await productRef.update({
+                    averageRating: parseFloat(newAvgRating.toFixed(1)),
+                    reviewCount: newReviewCount,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            } else {
+                // Last review, reset to 0
+                await productRef.update({
+                    averageRating: 0,
+                    reviewCount: 0,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Review deleted successfully"
+        });
+
+    } catch (error) {
+        console.error("DELETE REVIEW ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete review"
+        });
+    }
+});
+
+// POST /admin/seed-reviews - Seed test review data (for testing only)
+app.post("/admin/seed-reviews", async (req, res) => {
+    try {
+        // Get random products from the database
+        const productsSnap = await db.collection("products").limit(5).get();
+        
+        if (productsSnap.empty) {
+            return res.status(404).json({
+                success: false,
+                message: "No products found to seed reviews"
+            });
+        }
+
+        const products = [];
+        productsSnap.forEach(doc => {
+            products.push({ id: doc.id, ...doc.data() });
+        });
+
+        // Sample customer names
+        const customerNames = [
+            "Rajesh Kumar", "Priya Sharma", "Amit Patel", "Sneha Reddy", "Vikram Singh",
+            "Anita Desai", "Rahul Verma", "Kavita Nair", "Suresh Gupta", "Meera Iyer"
+        ];
+
+        // Sample reviews
+        const reviewTemplates = [
+            { rating: 5, feedback: "Excellent product! Highly recommended. Quality is top-notch and delivery was fast." },
+            { rating: 5, feedback: "Amazing quality and great value for money. Will definitely buy again!" },
+            { rating: 4, feedback: "Good product overall. Met my expectations. Packaging could be better." },
+            { rating: 4, feedback: "Very satisfied with the purchase. Good quality and reasonable price." },
+            { rating: 3, feedback: "Average product. It's okay for the price but nothing special." },
+            { rating: 3, feedback: "Decent quality but expected better. Delivery was delayed." },
+            { rating: 2, feedback: "Not satisfied with the quality. Product description was misleading." },
+            { rating: 2, feedback: "Below average quality. Would not recommend to others." },
+            { rating: 1, feedback: "Very poor quality. Completely disappointed with this purchase." },
+            { rating: 1, feedback: "Worst product ever. Total waste of money. Do not buy!" }
+        ];
+
+        const reviewsCreated = [];
+        const now = new Date();
+
+        // Create 3-5 reviews per product
+        for (const product of products) {
+            const numReviews = Math.floor(Math.random() * 3) + 3; // 3 to 5 reviews
+            let totalRating = 0;
+
+            for (let i = 0; i < numReviews; i++) {
+                const randomReview = reviewTemplates[Math.floor(Math.random() * reviewTemplates.length)];
+                const randomCustomer = customerNames[Math.floor(Math.random() * customerNames.length)];
+                
+                // Generate dates in the last 30 days
+                const daysAgo = Math.floor(Math.random() * 30);
+                const reviewDate = new Date(now);
+                reviewDate.setDate(reviewDate.getDate() - daysAgo);
+
+                const reviewRef = await db.collection("reviews").add({
+                    productId: product.id,
+                    userId: `test_user_${Math.floor(Math.random() * 1000)}`,
+                    userName: randomCustomer,
+                    rating: randomReview.rating,
+                    feedback: randomReview.feedback,
+                    createdAt: admin.firestore.Timestamp.fromDate(reviewDate)
+                });
+
+                totalRating += randomReview.rating;
+                reviewsCreated.push({
+                    id: reviewRef.id,
+                    productName: product.title || product.name,
+                    customer: randomCustomer,
+                    rating: randomReview.rating
+                });
+            }
+
+            // Update product's average rating and review count
+            const avgRating = totalRating / numReviews;
+            await db.collection("products").doc(product.id).update({
+                averageRating: parseFloat(avgRating.toFixed(1)),
+                reviewCount: numReviews,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Successfully created ${reviewsCreated.length} test reviews for ${products.length} products`,
+            reviews: reviewsCreated
+        });
+
+    } catch (error) {
+        console.error("SEED REVIEWS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to seed reviews: " + error.message
+        });
+    }
+});
+
 app.get("/health", (req, res) => res.status(200).send("OK"));
+
+// Root endpoint - API info
+app.get("/", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "SellSathi Backend API v2.8",
+        status: "Running",
+        endpoints: {
+            auth: [
+                "POST /auth/login",
+                "POST /auth/apply-seller",
+                "POST /auth/test-login",
+                "POST /auth/extract-aadhar",
+                "GET /auth/user-status/:uid"
+            ],
+            admin: [
+                "GET /admin/stats",
+                "GET /admin/sellers",
+                "GET /admin/all-sellers",
+                "GET /admin/products",
+                "GET /admin/orders",
+                "GET /admin/reviews-count",
+                "POST /admin/seller/:uid/approve",
+                "POST /admin/seller/:uid/reject"
+            ],
+            seller: [
+                "GET /seller/:uid/profile",
+                "GET /seller/:uid/stats",
+                "GET /seller/:uid/products",
+                "GET /seller/:uid/orders",
+                "GET /seller/:uid/dashboard-data",
+                "POST /seller/product/add",
+                "PUT /seller/product/update/:id",
+                "DELETE /seller/product/:id",
+                "PUT /seller/order/:id/status"
+            ],
+            marketplace: [
+                "GET /marketplace/products"
+            ],
+            reviews: [
+                "POST /reviews/add",
+                "GET /reviews/:productId"
+            ]
+        },
+        timestamp: new Date().toISOString()
+    });
+});
 
 // Global Error Handler
 app.use((err, req, res, next) => {
