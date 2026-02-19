@@ -794,6 +794,243 @@ app.get("/seller/:uid/orders", async (req, res) => {
     }
 });
 
+// GET /seller/:uid/dashboard-data — Unified endpoint for Dashboard.jsx
+app.get("/seller/:uid/dashboard-data", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        console.log("[dashboard-data] Fetching data for seller UID:", uid);
+
+        // 1) Fetch seller profile from 'sellers' collection
+        const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            // Check 'users' collection as fallback
+            const userRef = db.collection("users").doc(uid);
+            const userSnap = await userRef.get();
+            if (!userSnap.exists) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Seller not found"
+                });
+            }
+            const userData = userSnap.data();
+            // Return minimal profile with PENDING status so UI shows pending screen
+            return res.status(200).json({
+                success: true,
+                profile: {
+                    name: userData.fullName || userData.phone || "Seller",
+                    shopName: "",
+                    status: "PENDING"
+                },
+                stats: { totalSales: 0, totalProducts: 0, newOrders: 0, pendingOrders: 0 },
+                products: [],
+                orders: []
+            });
+        }
+
+        const sellerData = sellerSnap.data();
+
+        // Also get user info for the name
+        const userRef = db.collection("users").doc(uid);
+        const userSnap = await userRef.get();
+        const userData = userSnap.exists ? userSnap.data() : {};
+
+        // Build profile object
+        const profile = {
+            name: userData.fullName || sellerData.shopName || userData.phone || "Seller",
+            shopName: sellerData.shopName || "",
+            phone: sellerData.phone || userData.phone || "",
+            category: sellerData.category || "",
+            address: sellerData.address || "",
+            status: sellerData.sellerStatus || "PENDING"
+        };
+
+        // 2) Fetch seller's products
+        const productsSnap = await db.collection("products").where("sellerId", "==", uid).get();
+        const products = [];
+        productsSnap.forEach(doc => {
+            products.push({ id: doc.id, ...doc.data() });
+        });
+
+        // 3) Fetch seller's orders (scan all orders and filter by sellerId)
+        const allOrdersSnap = await db.collection("orders").get();
+        const orders = [];
+        let totalSales = 0;
+        let newOrdersCount = 0;
+        let pendingOrdersCount = 0;
+
+        allOrdersSnap.forEach(doc => {
+            const order = doc.data();
+            const sellerItems = order.items?.filter(item => item.sellerId === uid) || [];
+
+            if (sellerItems.length > 0) {
+                const sellerTotal = sellerItems.reduce((acc, item) => acc + (Number(item.price) * Number(item.quantity || 1)), 0);
+                totalSales += sellerTotal;
+
+                if (order.status === 'Processing' || order.status === 'New') newOrdersCount++;
+                if (order.status === 'Pending') pendingOrdersCount++;
+
+                orders.push({
+                    id: doc.id,
+                    orderId: order.orderId || doc.id.substring(0, 8).toUpperCase(),
+                    customer: order.customerName || order.shippingAddress?.name || "Customer",
+                    items: sellerItems,
+                    total: sellerTotal,
+                    status: order.status || "Pending",
+                    date: order.createdAt?.toDate ? order.createdAt.toDate().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
+                });
+            }
+        });
+
+        const stats = {
+            totalSales,
+            totalProducts: products.length,
+            newOrders: newOrdersCount,
+            pendingOrders: pendingOrdersCount
+        };
+
+        console.log(`[dashboard-data] Returning: ${products.length} products, ${orders.length} orders, profile status=${profile.status}`);
+
+        return res.status(200).json({
+            success: true,
+            profile,
+            stats,
+            products,
+            orders
+        });
+
+    } catch (error) {
+        console.error("DASHBOARD DATA ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch dashboard data: " + error.message
+        });
+    }
+});
+
+// PUT /seller/product/update/:id - Update a product
+app.put("/seller/product/update/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { sellerId, productData } = req.body;
+
+        if (!id || !productData) {
+            return res.status(400).json({ success: false, message: "Missing product ID or data" });
+        }
+
+        // Only update allowed fields (don't overwrite sellerId, createdAt)
+        const updateData = {
+            title: productData.title,
+            price: Number(productData.price),
+            discountPrice: productData.discountPrice ? Number(productData.discountPrice) : null,
+            category: productData.category,
+            stock: Number(productData.stock),
+            description: productData.description || "",
+            image: productData.image || "",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+
+        await db.collection("products").doc(id).update(updateData);
+
+        return res.status(200).json({
+            success: true,
+            message: "Product updated successfully"
+        });
+    } catch (error) {
+        console.error("UPDATE PRODUCT ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update product: " + error.message
+        });
+    }
+});
+
+// PUT /seller/order/:id/status - Update order status
+app.put("/seller/order/:id/status", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!id || !status) {
+            return res.status(400).json({ success: false, message: "Missing order ID or status" });
+        }
+
+        await db.collection("orders").doc(id).update({
+            status,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Order status updated"
+        });
+    } catch (error) {
+        console.error("UPDATE ORDER STATUS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update order status: " + error.message
+        });
+    }
+});
+
+// ========== MARKETPLACE ENDPOINTS ==========
+
+// GET /marketplace/products - All active products for the storefront
+app.get("/marketplace/products", async (req, res) => {
+    try {
+        const productsSnap = await db.collection("products").get();
+
+        const products = [];
+        productsSnap.forEach(doc => {
+            const d = doc.data();
+
+            // Normalize field names:
+            // Seed products: name, imageUrl
+            // Seller products: title, image
+            const name = d.name || d.title || "Unnamed Product";
+            const imageUrl = d.imageUrl || d.image || "";
+            const price = Number(d.price) || 0;
+            const discountPrice = d.discountPrice ? Number(d.discountPrice) : null;
+            const category = d.category || "Other";
+            const stock = Number(d.stock) || 0;
+            const description = d.description || "";
+
+            // Skip out-of-stock products (optional — comment out if you want to show them)
+            // if (stock <= 0) return;
+
+            products.push({
+                id: doc.id,
+                name,
+                imageUrl,
+                price,
+                discountPrice,
+                category,
+                stock,
+                description,
+                sellerId: d.sellerId || null,
+                status: d.status || "Active"
+            });
+        });
+
+        // Only return Active products
+        const activeProducts = products.filter(p => p.status !== "Inactive");
+
+        console.log(`[marketplace/products] Returning ${activeProducts.length} products (${products.length} total)`);
+
+        return res.status(200).json({
+            success: true,
+            products: activeProducts
+        });
+    } catch (error) {
+        console.error("MARKETPLACE PRODUCTS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch marketplace products: " + error.message
+        });
+    }
+});
+
 const PORT = 5000;
 app.listen(PORT, () => {
     console.log(`Auth service running on port ${PORT}`);

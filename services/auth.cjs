@@ -11,7 +11,6 @@ process.on('unhandledRejection', (reason, promise) => {
 
 const express = require("express");
 const admin = require("firebase-admin");
-const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
 const cloudinary = require('cloudinary').v2;
@@ -34,7 +33,7 @@ const { GoogleGenerativeAI } = require("@google/generative-ai");
 const app = express();
 console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
 app.use(cors());
-app.use(bodyParser.json());
+app.use(express.json());
 
 admin.initializeApp({
     credential: admin.credential.cert(require("./serviceAccountKey.json")),
@@ -70,10 +69,117 @@ const upload = multer({
 // TEST CREDENTIALS - For development/testing purposes only
 const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
-    '+919876543210': { otp: '123456', role: 'CONSUMER' }, // Test consumer number
-    '+917676879059': { otp: '123456', role: 'CONSUMER' }, // Real phone - Test as consumer
-    // Add more test numbers here as needed
+    '+919876543210': { otp: '123456', role: 'CONSUMER' },
+    '+919353469036': { otp: '741852', role: 'SELLER' },
 };
+
+// ========== AUTH MIDDLEWARE ==========
+
+/**
+ * Verifies user identity via one of two methods:
+ * 1. Firebase ID token from Authorization: Bearer <token> header (production + dev)
+ * 2. X-Test-UID header for test/dev mode only (completely disabled in production)
+ *
+ * Attaches user info to req.user on success.
+ */
+const verifyAuth = async (req, res, next) => {
+    try {
+        // DEV-ONLY: Allow test UID bypass (disabled in production)
+        const testUid = req.headers["x-test-uid"];
+        if (IS_DEV && testUid) {
+            // Look up user in Firestore to verify they exist
+            const userSnap = await db.collection("users").doc(testUid).get();
+            if (!userSnap.exists) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Test user not found in database",
+                });
+            }
+            const userData = userSnap.data();
+            req.user = {
+                uid: testUid,
+                phone_number: userData.phone || null,
+                role: userData.role,
+                isTestMode: true,
+            };
+            return next();
+        }
+
+        // STANDARD: Firebase Bearer token verification
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                success: false,
+                message: "Authorization header with Bearer token is required",
+            });
+        }
+
+        const idToken = authHeader.split("Bearer ")[1];
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.user = decodedToken;
+        next();
+    } catch (error) {
+        console.error("AUTH MIDDLEWARE ERROR:", error.message);
+        return res.status(401).json({
+            success: false,
+            message: "Invalid or expired token",
+        });
+    }
+};
+
+/**
+ * Verifies the authenticated user has ADMIN role in the database.
+ * Must be used AFTER verifyAuth middleware.
+ */
+const verifyAdmin = async (req, res, next) => {
+    try {
+        const uid = req.user.uid;
+        const phoneNumber = req.user.phone_number || null;
+
+        // Check phone matches admin phone
+        if (phoneNumber !== ADMIN_PHONE) {
+            return res.status(403).json({
+                success: false,
+                message: "Admin access denied",
+            });
+        }
+
+        // Double-check role in database
+        const userSnap = await db.collection("users").doc(uid).get();
+        if (!userSnap.exists || userSnap.data().role !== "ADMIN") {
+            return res.status(403).json({
+                success: false,
+                message: "Admin access denied",
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error("ADMIN VERIFY ERROR:", error.message);
+        return res.status(403).json({
+            success: false,
+            message: "Admin verification failed",
+        });
+    }
+};
+
+// ========== UTILITY HELPERS ==========
+
+/**
+ * Safely converts a Firestore Timestamp or any date-like value to an ISO date string.
+ * Returns today's date as fallback if the value is null/undefined.
+ */
+const safeToDateString = (val) => {
+    try {
+        if (!val) return new Date().toISOString().split("T")[0];
+        if (val.toDate) return val.toDate().toISOString().split("T")[0];
+        if (val instanceof Date) return val.toISOString().split("T")[0];
+        return new Date(val).toISOString().split("T")[0];
+    } catch {
+        return new Date().toISOString().split("T")[0];
+    }
+};
+
 
 // Endpoint for marketplace products (combines products and listedproduct)
 app.get("/marketplace/products", async (req, res) => {
@@ -203,34 +309,24 @@ app.post("/auth/login", async (req, res) => {
             });
         }
 
-        // STRICT SECURITY CHECK: Only specific phone number can be ADMIN
-        const ADMIN_PHONE = "+917483743936";
-
         let userRole = userData.role;
 
-        // If database says ADMIN but phone doesn't match, force CONSUMER
-        if (userData.role === "ADMIN" && phoneNumber !== ADMIN_PHONE) {
-            console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
-            userRole = "CONSUMER";
-        }
-
-        // Only allow ADMIN role if phone matches exactly
-        if (userRole === "ADMIN") {
+        // STRICT SECURITY CHECK: Only the designated phone number can be ADMIN
+        if (userData.role === "ADMIN") {
             if (phoneNumber !== ADMIN_PHONE) {
-                console.error(`SECURITY BREACH ATTEMPT: User with phone ${phoneNumber} trying to access admin with role ADMIN`);
-                return res.status(403).json({
-                    success: false,
-                    message: "Unauthorized admin access",
+                console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
+                userRole = "CONSUMER";
+            } else {
+                return res.status(200).json({
+                    success: true,
+                    uid,
+                    role: "ADMIN",
+                    status: "AUTHORIZED",
+                    message: "Admin login successful",
                 });
             }
-            return res.status(200).json({
-                success: true,
-                uid,
-                role: "ADMIN",
-                status: "AUTHORIZED",
-                message: "Admin login successful",
-            });
         }
+
         if (userData.role === "SELLER") {
             const sellerRef = db.collection("sellers").doc(uid);
             const sellerSnap = await sellerRef.get();
@@ -623,6 +719,13 @@ app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
 // This endpoint allows testing without Firebase phone auth
 app.post("/auth/test-login", async (req, res) => {
     try {
+        if (!IS_DEV) {
+            return res.status(404).json({
+                success: false,
+                message: "Endpoint not available",
+            });
+        }
+
         const { phone, otp } = req.body;
 
         if (!phone || !otp) {
@@ -687,31 +790,22 @@ app.post("/auth/test-login", async (req, res) => {
             });
         }
 
-        // STRICT SECURITY CHECK: Only specific phone number can have ADMIN role
-        const ADMIN_PHONE = "+917483743936";
         let userRole = userData.role;
 
-        if (userData.role === "ADMIN" && phoneNumber !== ADMIN_PHONE) {
-            console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
-            userRole = "CONSUMER";
-        }
-
-        // Only allow ADMIN role if phone matches exactly
-        if (userRole === "ADMIN") {
+        // STRICT SECURITY CHECK: Only the designated phone number can be ADMIN
+        if (userData.role === "ADMIN") {
             if (phoneNumber !== ADMIN_PHONE) {
-                console.error(`SECURITY BREACH ATTEMPT: User with phone ${phoneNumber} trying to access admin with role ADMIN`);
-                return res.status(403).json({
-                    success: false,
-                    message: "Unauthorized admin access",
+                console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
+                userRole = "CONSUMER";
+            } else {
+                return res.status(200).json({
+                    success: true,
+                    uid,
+                    role: "ADMIN",
+                    status: "AUTHORIZED",
+                    message: "Admin login successful",
                 });
             }
-            return res.status(200).json({
-                success: true,
-                uid,
-                role: "ADMIN",
-                status: "AUTHORIZED",
-                message: "Admin login successful",
-            });
         }
 
         return res.status(200).json({
@@ -734,7 +828,7 @@ app.post("/auth/test-login", async (req, res) => {
 // ========== ADMIN ENDPOINTS ==========
 
 // GET /admin/stats - Dashboard statistics
-app.get("/admin/stats", async (req, res) => {
+app.get("/admin/stats", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const [usersSnap, sellersSnap, productsSnap, ordersSnap] = await Promise.all([
             db.collection("users").get(),
@@ -753,7 +847,7 @@ app.get("/admin/stats", async (req, res) => {
             stats: {
                 totalSellers,
                 totalProducts,
-                todayOrders: Math.floor(totalOrders * 0.3), // Estimate
+                todayOrders: Math.floor(totalOrders * 0.3), // TODO: Replace with actual today's order count query
                 pendingApprovals: pendingSellers
             }
         });
@@ -767,7 +861,7 @@ app.get("/admin/stats", async (req, res) => {
 });
 
 // GET /admin/sellers - Pending sellers for approval
-app.get("/admin/sellers", async (req, res) => {
+app.get("/admin/sellers", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const sellersSnap = await db.collection("sellers").where("sellerStatus", "==", "PENDING").get();
 
@@ -782,7 +876,7 @@ app.get("/admin/sellers", async (req, res) => {
                 email: userData?.phone || "N/A",
                 type: "Individual",
                 status: sellerData.sellerStatus,
-                joined: sellerData.appliedAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0],
+                joined: safeToDateString(sellerData.appliedAt),
                 shopName: sellerData.shopName,
                 category: sellerData.category,
                 address: sellerData.address,
@@ -808,7 +902,7 @@ app.get("/admin/sellers", async (req, res) => {
 });
 
 // GET /admin/products - All products for review
-app.get("/admin/products", async (req, res) => {
+app.get("/admin/products", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const productsSnap = await db.collection("products").get();
 
@@ -851,7 +945,7 @@ app.get("/admin/products", async (req, res) => {
 });
 
 // GET /admin/orders - All orders
-app.get("/admin/orders", async (req, res) => {
+app.get("/admin/orders", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const ordersSnap = await db.collection("orders").get();
 
@@ -864,7 +958,7 @@ app.get("/admin/orders", async (req, res) => {
                 customer: orderData.customerName || "Unknown",
                 total: orderData.total || 0,
                 status: orderData.status || "Processing",
-                date: orderData.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                date: safeToDateString(orderData.createdAt)
             });
         }
 
@@ -882,11 +976,12 @@ app.get("/admin/orders", async (req, res) => {
 });
 
 // POST /admin/seller/:uid/approve - Approve seller
-app.post("/admin/seller/:uid/approve", async (req, res) => {
+app.post("/admin/seller/:uid/approve", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { uid } = req.params;
         console.log(`[Admin] Approving seller application for UID: ${uid}`);
 
+        // Verify seller document exists
         const sellerRef = db.collection("sellers").doc(uid);
         const sellerSnap = await sellerRef.get();
 
@@ -932,11 +1027,20 @@ app.post("/admin/seller/:uid/approve", async (req, res) => {
 });
 
 // POST /admin/seller/:uid/reject - Reject seller
-app.post("/admin/seller/:uid/reject", async (req, res) => {
+app.post("/admin/seller/:uid/reject", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { uid } = req.params;
 
+        // Verify seller document exists
         const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+        if (!sellerSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Seller not found",
+            });
+        }
+
         await sellerRef.update({
             sellerStatus: "REJECTED",
             rejectedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -1048,7 +1152,7 @@ app.get("/seller/:uid/stats", async (req, res) => {
 });
 
 // GET /seller/:uid/products - Get all products for a seller
-app.get("/seller/:uid/products", async (req, res) => {
+app.get("/seller/:uid/products", verifyAuth, async (req, res) => {
     try {
         const { uid } = req.params;
         const productsSnap = await db.collection("sellers").doc(uid).collection("listedproducts").get();
@@ -1072,16 +1176,37 @@ app.get("/seller/:uid/products", async (req, res) => {
 });
 
 // POST /seller/product/add - Add a new product
-app.post("/seller/product/add", async (req, res) => {
+app.post("/seller/product/add", verifyAuth, async (req, res) => {
     try {
         const { sellerId, productData } = req.body;
 
-        if (!sellerId || !productData) {
-            return res.status(400).json({ success: false, message: "Missing data" });
+        if (!sellerId || !productData || typeof productData !== "object") {
+            return res.status(400).json({ success: false, message: "sellerId and productData are required" });
+        }
+
+        // Validate required product fields
+        if (!productData.title || !productData.price || !productData.category) {
+            return res.status(400).json({
+                success: false,
+                message: "Product title, price, and category are required",
+            });
+        }
+
+        const price = Number(productData.price);
+        if (isNaN(price) || price <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Price must be a positive number",
+            });
         }
 
         const newProduct = {
-            ...productData,
+            title: productData.title,
+            price: price,
+            category: productData.category,
+            description: productData.description || "",
+            image: productData.image || "",
+            imageUrl: productData.imageUrl || "",
             sellerId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             status: "Active"
@@ -1111,7 +1236,7 @@ app.post("/seller/product/add", async (req, res) => {
 });
 
 // DELETE /seller/product/:id - Delete a product
-app.delete("/seller/product/:id", async (req, res) => {
+app.delete("/seller/product/:id", verifyAuth, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -1119,17 +1244,22 @@ app.delete("/seller/product/:id", async (req, res) => {
         const productRef = db.collection("products").doc(id);
         const productSnap = await productRef.get();
 
-        if (productSnap.exists) {
-            const { sellerId } = productSnap.data();
-
-            // 2. Delete from seller's subcollection
-            if (sellerId) {
-                await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).delete();
-            }
-
-            // 3. Delete from main collection
-            await productRef.delete();
+        if (!productSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found",
+            });
         }
+
+        const { sellerId } = productSnap.data();
+
+        // Delete from seller's subcollection
+        if (sellerId) {
+            await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).delete();
+        }
+
+        // Delete from main collection
+        await productRef.delete();
 
         return res.status(200).json({
             success: true,
@@ -1245,7 +1375,7 @@ app.get("/seller/:uid/orders", async (req, res) => {
                     items: sellerItems,
                     total: sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0),
                     status: order.status,
-                    date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                    date: safeToDateString(order.createdAt)
                 });
             }
         });
@@ -1258,10 +1388,19 @@ app.get("/seller/:uid/orders", async (req, res) => {
 });
 
 // PUT /seller/order/:id/status - Update order status
-app.put("/seller/order/:id/status", async (req, res) => {
+app.put("/seller/order/:id/status", verifyAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
+
+        // Validate status value
+        const VALID_STATUSES = ["Processing", "Pending", "Shipped", "Delivered", "Cancelled"];
+        if (!status || !VALID_STATUSES.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
+            });
+        }
 
         await db.collection("orders").doc(id).update({
             status,

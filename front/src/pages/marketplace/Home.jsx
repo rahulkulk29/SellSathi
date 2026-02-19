@@ -15,8 +15,8 @@ export default function Home() {
     // Filters State
     const [categories, setCategories] = useState([]);
     const [selectedCategory, setSelectedCategory] = useState('All');
-    const [priceRange, setPriceRange] = useState(5000); // Trigger for filtering
-    const [sliderValue, setSliderValue] = useState(5000); // Visual slider state
+    const [priceRange, setPriceRange] = useState(100000); // Max price filter
+    const [sliderValue, setSliderValue] = useState(100000); // Visual slider state
     const [visibleCount, setVisibleCount] = useState(4); // Pagination
     const [sortBy, setSortBy] = useState('featured');
 
@@ -59,9 +59,9 @@ export default function Home() {
         // Search Filter
         if (searchQuery) {
             result = result.filter(product =>
-                product.name.toLowerCase().includes(searchQuery) ||
-                product.description.toLowerCase().includes(searchQuery) ||
-                product.category.toLowerCase().includes(searchQuery)
+                (product.name || '').toLowerCase().includes(searchQuery) ||
+                (product.description || '').toLowerCase().includes(searchQuery) ||
+                (product.category || '').toLowerCase().includes(searchQuery)
             );
         }
 
@@ -158,14 +158,14 @@ export default function Home() {
                                     <input
                                         type="range"
                                         min="0"
-                                        max="5000"
-                                        step="100"
+                                        max="100000"
+                                        step="500"
                                         value={sliderValue}
                                         onChange={(e) => setSliderValue(Number(e.target.value))}
                                         onMouseUp={() => setPriceRange(sliderValue)}
                                         onTouchEnd={() => setPriceRange(sliderValue)}
                                         style={{
-                                            background: `linear-gradient(to right, var(--primary) ${(sliderValue / 5000) * 100}%, var(--border) ${(sliderValue / 5000) * 100}%)`
+                                            background: `linear-gradient(to right, var(--primary) ${(sliderValue / 100000) * 100}%, var(--border) ${(sliderValue / 100000) * 100}%)`
                                         }}
                                         className="price-slider"
                                     />
