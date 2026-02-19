@@ -14,6 +14,21 @@ const admin = require("firebase-admin");
 const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
+const cloudinary = require('cloudinary').v2;
+const streamifier = require('streamifier');
+
+// Cloudinary Config
+const CLOUDINARY_CLOUD = process.env.CLOUDINARY_CLOUD_NAME || 'dhevauth5';
+const CLOUDINARY_KEY = process.env.CLOUDINARY_API_KEY || '511255263888482';
+const CLOUDINARY_SECRET = process.env.CLOUDINARY_API_SECRET || 'Lct_38d4lRzzsaY78EyB0KyWLDk';
+
+cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD,
+    api_key: CLOUDINARY_KEY,
+    api_secret: CLOUDINARY_SECRET
+});
+console.log(`☁️  Cloudinary configured: cloud_name=${CLOUDINARY_CLOUD}, api_key=${CLOUDINARY_KEY.substring(0, 4)}...`);
+
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
@@ -94,6 +109,51 @@ app.get("/marketplace/products", async (req, res) => {
     } catch (error) {
         console.error("MARKETPLACE PRODUCTS ERROR:", error);
         return res.status(500).json({ success: false, message: "Failed to fetch products" });
+    }
+});
+
+// ============================================================
+// POST /seller/upload-image — Upload product image to Cloudinary
+// ============================================================
+app.post("/seller/upload-image", upload.single('image'), async (req, res) => {
+    console.log("📸 Product image upload request received");
+
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: "No image file provided" });
+    }
+
+    try {
+        const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {
+                    folder: 'sellsathi/products',
+                    resource_type: 'image',
+                    transformation: [
+                        { width: 1200, height: 1200, crop: 'limit' },
+                        { quality: 'auto:good' },
+                        { fetch_format: 'auto' }
+                    ]
+                },
+                (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
+                }
+            );
+            streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+        });
+
+        console.log("✅ Product image uploaded:", uploadResult.secure_url);
+        return res.status(200).json({
+            success: true,
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id
+        });
+    } catch (error) {
+        console.error("❌ Product image upload error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Image upload failed: " + error.message
+        });
     }
 });
 
@@ -442,23 +502,38 @@ app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) 
             });
         }
 
-        // 2. Attempt to Upload to Firebase Storage (FULLY ASYNCHRONOUS for latency)
+        // 2. Upload to Cloudinary (Aadhaar Image)
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "aadhaar_cards",
+                        resource_type: "image",
+                        public_id: `aadhaar_${Date.now()}` // Optional: custom ID
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            });
+        };
+
         let imageUrl = "";
-        const bucket = admin.storage().bucket();
-        const fileName = `aadhaar/${Date.now()}-${req.file.originalname}`;
-
-        // We do NOT await this. It runs in the background.
-        bucket.file(fileName).save(req.file.buffer, {
-            metadata: { contentType: req.file.mimetype },
-            public: true
-        }).then(() => {
-            console.log(`[Storage] Background upload complete: ${fileName}`);
-        }).catch(err => {
-            console.warn(`[Storage] Background upload failed: ${err.message}`);
-        });
-
-        // Construct the expected URL ahead of time
-        imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+        try {
+            console.log("[Cloudinary] Uploading Aadhaar image...");
+            const cloudResult = await uploadToCloudinary();
+            imageUrl = cloudResult.secure_url;
+            console.log(`[Cloudinary] Upload complete: ${imageUrl}`);
+        } catch (uploadErr) {
+            console.error("[Cloudinary] Upload failed:", uploadErr);
+            return res.status(500).json({
+                success: false,
+                message: "Image upload failed. Please try again.",
+                error: uploadErr.message || "Cloudinary Upload Error"
+            });
+        }
 
         // Calculate Age from DOB
         let age = "N/A";
@@ -498,6 +573,48 @@ app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) 
             message: userMessage,
             error: error.message,
             stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
+// New Endpoint: Generic Image Upload to Cloudinary (for Products, etc.)
+app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No image file provided" });
+        }
+
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "products", // Store in products folder
+                        resource_type: "image"
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            });
+        };
+
+        console.log("[Cloudinary] Uploading product image...");
+        const result = await uploadToCloudinary();
+        console.log(`[Cloudinary] Product image uploaded: ${result.secure_url}`);
+
+        return res.status(200).json({
+            success: true,
+            url: result.secure_url,
+            message: "Image uploaded successfully"
+        });
+
+    } catch (error) {
+        console.error("UPLOAD ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Image upload failed: " + error.message
         });
     }
 });
@@ -1027,19 +1144,18 @@ app.delete("/seller/product/:id", async (req, res) => {
     }
 });
 
-// GET /seller/:uid/orders - Get orders for a seller
-// Aggregated Dashboard Data Endpoint (Optimization)
+// GET /seller/:uid/orders - Get orders for// Aggregated Dashboard Data Endpoint (Optimization)
 app.get("/seller/:uid/dashboard-data", async (req, res) => {
     try {
         const { uid } = req.params;
 
         // Fetch everything in parallel on the server
-        const [sellerSnap, userSnap, productsSnap, allOrdersSnap, listedProdsSnap] = await Promise.all([
+        // Products come from MAIN collection filtered by sellerId (reliable source)
+        const [sellerSnap, userSnap, productsSnap, allOrdersSnap] = await Promise.all([
             db.collection("sellers").doc(uid).get(),
             db.collection("users").doc(uid).get(),
             db.collection("products").where("sellerId", "==", uid).get(),
-            db.collection("orders").get(),
-            db.collection("sellers").doc(uid).collection("listedproducts").get()
+            db.collection("orders").get()
         ]);
 
         if (!sellerSnap.exists) {
@@ -1048,6 +1164,12 @@ app.get("/seller/:uid/dashboard-data", async (req, res) => {
 
         const sellerData = sellerSnap.data();
         const userData = userSnap.data();
+
+        // Build products array from main collection
+        const products = productsSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
 
         // Calculate Stats
         let totalSales = 0;
@@ -1078,10 +1200,7 @@ app.get("/seller/:uid/dashboard-data", async (req, res) => {
             }
         });
 
-        const products = [];
-        listedProdsSnap.forEach(doc => {
-            products.push({ id: doc.id, ...doc.data() });
-        });
+        console.log(`[Dashboard] Seller ${uid}: ${products.length} products found in main collection`);
 
         return res.status(200).json({
             success: true,
@@ -1094,7 +1213,7 @@ app.get("/seller/:uid/dashboard-data", async (req, res) => {
             },
             stats: {
                 totalSales,
-                totalProducts: productsSnap.size,
+                totalProducts: products.length,
                 newOrders: newOrdersCount,
                 pendingOrders: pendingOrdersCount
             },

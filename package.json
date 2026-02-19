@@ -9,9 +9,6 @@
     "build": "npm --prefix front run build",
     "start": "npm --prefix back run start"
   },
-  "devDependencies": {
-    "concurrently": "^8.0.1"
-  },
   "dependencies": {
     "@google/genai": "^1.41.0",
     "@google/generative-ai": "^0.24.1",

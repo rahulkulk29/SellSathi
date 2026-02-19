@@ -13,17 +13,19 @@ import {
     ShoppingBag,
     Tag,
     Layers,
-    Info
+    Info,
+    Loader
 } from 'lucide-react';
 import { auth } from '../../config/firebase';
 
 export default function AddProduct() {
     const navigate = useNavigate();
     const [loading, setLoading] = useState(false);
-    const [previewImage, setPreviewImage] = useState('');
+    const [uploading, setUploading] = useState(false);
     const [product, setProduct] = useState({
         title: '',
         price: '',
+        discountPrice: '',
         category: '',
         stock: '',
         description: '',
@@ -240,10 +242,7 @@ export default function AddProduct() {
                                             <img
                                                 src={product.image}
                                                 alt="Preview"
-                                                style={{ width: '100%', borderRadius: '12px', maxHeight: '300px', objectFit: 'cover' }}
-                                                onError={(e) => {
-                                                    e.target.src = 'https://via.placeholder.com/400x400?text=Invalid+Image+URL';
-                                                }}
+                                                style={{ width: '100%', borderRadius: '12px', maxHeight: '300px', objectFit: 'contain' }}
                                             />
                                             <button
                                                 type="button"
@@ -263,21 +262,49 @@ export default function AddProduct() {
                                             </button>
                                         </div>
                                     ) : (
-                                        <div className="flex flex-col items-center gap-3">
+                                        <label className="flex flex-col items-center gap-3" style={{ cursor: 'pointer', width: '100%' }}>
                                             <div style={{ width: '60px', height: '60px', borderRadius: '50%', background: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                                <Upload className="text-muted" />
+                                                {uploading ? <Loader className="animate-spin text-primary" /> : <Upload className="text-muted" />}
                                             </div>
-                                            <div style={{ width: '100%' }}>
+                                            <div style={{ width: '100%', textAlign: 'center' }}>
+                                                <p style={{ fontWeight: 600, color: 'var(--primary)' }}>
+                                                    {uploading ? "Uploading..." : "Click to Upload Image"}
+                                                </p>
+                                                <p className="text-muted" style={{ fontSize: '0.8rem' }}>High-quality images work best!</p>
                                                 <input
-                                                    type="text"
-                                                    placeholder="Paste Image URL"
-                                                    style={{ width: '100%', marginBottom: '0.5rem', textAlign: 'center' }}
-                                                    value={product.image}
-                                                    onChange={e => setProduct({ ...product, image: e.target.value })}
+                                                    type="file"
+                                                    accept="image/*"
+                                                    hidden
+                                                    disabled={uploading}
+                                                    onChange={async (e) => {
+                                                        const file = e.target.files[0];
+                                                        if (!file) return;
+
+                                                        setUploading(true);
+                                                        const formData = new FormData();
+                                                        formData.append('image', file);
+
+                                                        try {
+                                                            const response = await fetch('http://localhost:5000/seller/upload-image', {
+                                                                method: 'POST',
+                                                                body: formData
+                                                            });
+                                                            const data = await response.json();
+                                                            if (data.success) {
+                                                                setProduct({ ...product, image: data.url });
+                                                            } else {
+                                                                alert('Upload failed: ' + data.message);
+                                                            }
+                                                        } catch (err) {
+                                                            console.error(err);
+                                                            alert('Upload error');
+                                                        } finally {
+                                                            setUploading(false);
+                                                        }
+                                                    }}
                                                 />
-                                                <p className="text-muted" style={{ fontSize: '0.8rem' }}>High-quality URLs from Unsplash work best!</p>
                                             </div>
-                                        </div>
+                                        </label>
                                     )}
                                 </div>
 
