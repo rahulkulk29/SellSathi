@@ -68,14 +68,6 @@ input:focus {
   box-shadow: 0 0 0 2px hsla(230, 85%, 60%, 0.2);
 }
 
-.error-ring {
-  border-color: var(--error) !important;
-}
-
-.error-ring:focus {
-  box-shadow: 0 0 0 2px hsla(0, 85%, 60%, 0.2) !important;
-}
-
 /* Layout Utilities */
 .container {
   max-width: 1200px;
@@ -174,6 +166,14 @@ h4 {
   background-clip: text;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
+}
+
+.shadow-glow {
+  box-shadow: 0 0 20px hsla(230, 85%, 60%, 0.3);
+}
+
+.shadow-glow:hover {
+  box-shadow: 0 0 30px hsla(230, 85%, 60%, 0.5);
 }
 
 /* Animations */

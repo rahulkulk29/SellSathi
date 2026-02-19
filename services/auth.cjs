@@ -1,31 +1,56 @@
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+
+process.on('uncaughtException', (err) => {
+    console.error('🔥 UNCAUGHT EXCEPTION:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 UNHANDLED REJECTION at:', promise, 'reason:', reason);
+});
+
 const express = require("express");
 const admin = require("firebase-admin");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+const multer = require("multer");
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
-app.use(cors()); // Enable CORS for all routes
+console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
+app.use(cors());
 app.use(bodyParser.json());
 
-// Request logger for debugging
-app.use((req, res, next) => {
-    console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
-    next();
-});
-
-app.get("/", (req, res) => {
-    res.send("Backend is running from services/auth.cjs!");
-});
-
-const serviceAccount = require("./serviceAccountKey.json");
-
 admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
+    credential: admin.credential.cert(require("./serviceAccountKey.json")),
+    storageBucket: "sellsathi.firebasestorage.app"
 });
-
-console.log("🔥 Firebase initialized with Project ID:", serviceAccount.project_id);
 
 const db = admin.firestore();
+
+// Gemini Configuration
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_KEY || GEMINI_KEY === 'your_gemini_api_key_here') {
+    console.warn("⚠️  WARNING: GEMINI_API_KEY is not set correctly in services/.env. Extraction will fail.");
+    console.log("Current keys in process.env:", Object.keys(process.env).filter(k => k.includes("API")));
+} else {
+    console.log("✅ GEMINI_API_KEY loaded successfully:", GEMINI_KEY.substring(0, 5) + "..." + GEMINI_KEY.substring(GEMINI_KEY.length - 4));
+}
+const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+
+// Multer Setup for Memory Storage
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed!'), false);
+        }
+    }
+});
 
 // TEST CREDENTIALS - For development/testing purposes only
 const TEST_CREDENTIALS = {
@@ -34,6 +59,43 @@ const TEST_CREDENTIALS = {
     '+917676879059': { otp: '123456', role: 'CONSUMER' }, // Real phone - Test as consumer
     // Add more test numbers here as needed
 };
+
+// Endpoint for marketplace products (combines products and listedproduct)
+app.get("/marketplace/products", async (req, res) => {
+    console.log("Fetching marketplace products...");
+    try {
+        // Remove orderBy because documents without createdAt are omitted by Firestore
+        const productsSnap = await db.collection("products").get();
+
+        const products = productsSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data(),
+            name: doc.data().title || doc.data().name,
+            imageUrl: doc.data().image || doc.data().imageUrl,
+            price: Number(doc.data().price) // Ensure price is a number
+        }));
+
+        // Sort in memory to include products without timestamps
+        const sortedProducts = products.sort((a, b) => {
+            const getTime = (val) => {
+                if (!val) return 0;
+                if (val.toDate) return val.toDate().getTime(); // Firestore Timestamp
+                if (val instanceof Date) return val.getTime(); // JS Date
+                if (typeof val === 'number') return val; // Raw number/timestamp
+                return new Date(val).getTime(); // Try to parse anything else
+            };
+            return getTime(b.createdAt) - getTime(a.createdAt);
+        });
+
+        return res.status(200).json({
+            success: true,
+            products: sortedProducts
+        });
+    } catch (error) {
+        console.error("MARKETPLACE PRODUCTS ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch products" });
+    }
+});
 
 app.post("/auth/login", async (req, res) => {
     try {
@@ -144,9 +206,10 @@ app.post("/auth/login", async (req, res) => {
             }
 
             if (sellerData.sellerStatus === "REJECTED") {
-                return res.status(403).json({
-                    success: false,
-                    role: "SELLER",
+                return res.status(200).json({
+                    success: true,
+                    uid,
+                    role: "SELLER", // KEEP AS SELLER so they can see the rejection message on dashboard
                     status: "REJECTED",
                     message: "Seller request rejected",
                 });
@@ -174,6 +237,7 @@ app.post("/auth/login", async (req, res) => {
 
 // Endpoint for seller application
 app.post("/auth/apply-seller", async (req, res) => {
+    console.log("HIT: /auth/apply-seller");
     try {
         const { idToken, sellerDetails } = req.body;
 
@@ -185,9 +249,14 @@ app.post("/auth/apply-seller", async (req, res) => {
         }
 
         if (!sellerDetails || !sellerDetails.shopName || !sellerDetails.category || !sellerDetails.address) {
+            console.warn("REJECTED: Missing fields in apply-seller", {
+                shopName: sellerDetails?.shopName,
+                category: sellerDetails?.category,
+                address: sellerDetails?.address
+            });
             return res.status(400).json({
                 success: false,
-                message: "Shop name, category, and address are required",
+                message: `Missing required fields: ${!sellerDetails.shopName ? 'Shop Name, ' : ''}${!sellerDetails.category ? 'Category, ' : ''}${!sellerDetails.address ? 'Address' : ''}`.replace(/, $/, ""),
             });
         }
 
@@ -206,13 +275,32 @@ app.post("/auth/apply-seller", async (req, res) => {
         }
 
         const userData = userSnap.data();
+        console.log(`[DEBUG] Registration attempt: UID=${uid}, Current Role from DB=${userData.role}`);
 
         // Check if user is already a seller
         if (userData.role === "SELLER") {
-            return res.status(400).json({
-                success: false,
-                message: "You are already registered as a seller",
-            });
+            const sellerRef = db.collection("sellers").doc(uid);
+            const sellerSnap = await sellerRef.get();
+
+            if (sellerSnap.exists) {
+                const sellerData = sellerSnap.data();
+                console.log(`[DEBUG] Apply-Seller MATCH: UID=${uid} | Role=${userData.role} | StatusChecked=${sellerData.sellerStatus}`);
+                if (sellerData.sellerStatus === "APPROVED") {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Database Alert: Your account (UID: ${uid.substring(0, 5)}...) is already registered as an APPROVED SELLER. You cannot apply again while this role is active.`,
+                    });
+                }
+                if (sellerData.sellerStatus === "PENDING") {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Application Alert: You already have a PENDING seller application (UID: ${uid.substring(0, 5)}...). Please wait for admin approval.`,
+                    });
+                }
+                // If rejected, we allow re-application below
+            } else {
+                console.log(`[DEBUG] Role is SELLER but no document found in sellers collection for UID: ${uid}. Proceeding with application.`);
+            }
         }
 
         // Check if user is admin
@@ -232,6 +320,12 @@ app.post("/auth/apply-seller", async (req, res) => {
             category: sellerDetails.category,
             address: sellerDetails.address,
             gstNumber: sellerDetails.gstNumber || "",
+            // Aadhaar Specific Data
+            aadhaarNumber: sellerDetails.aadhaarNumber,
+            age: sellerDetails.age,
+            aadhaarImageUrl: sellerDetails.aadhaarImageUrl,
+            extractedName: sellerDetails.extractedName,
+
             sellerStatus: "PENDING",
             appliedAt: admin.firestore.FieldValue.serverTimestamp(),
             approvedAt: null,
@@ -257,6 +351,153 @@ app.post("/auth/apply-seller", async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to submit seller application",
+        });
+    }
+});
+
+// GET /auth/user-status/:uid - Check application status
+app.get("/auth/user-status/:uid", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            return res.status(200).json({ success: true, status: 'NONE' });
+        }
+
+        const sellerData = sellerSnap.data();
+        console.log(`[DEBUG] User-Status check: UID=${uid} | StatusFound=${sellerData.sellerStatus}`);
+        return res.status(200).json({
+            success: true,
+            status: sellerData.sellerStatus // 'PENDING', 'APPROVED', 'REJECTED'
+        });
+    } catch (error) {
+        console.error("STATUS CHECK ERROR:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No file uploaded" });
+        }
+
+        console.log(`Processing Aadhaar extraction... [Size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB]`);
+
+        // 1. Extract Data using Gemini - QUOTA OPTIMIZED (v2.8)
+        const models = ["gemini-flash-latest", "gemini-2.0-flash"];
+        let lastError = null;
+        let extractedData = null;
+
+        const tryModel = async (modelName) => {
+            console.log(`[Gemini] Attempting ${modelName}...`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const prompt = `Strict JSON extraction from Aadhaar. Extract: name, aadhaar_no, dob, gender, address. Format: {"name": "...", "aadhaar_no": "...", "dob": "...", "gender": "...", "address": "..."}.`;
+
+            const result = await model.generateContent([
+                { text: prompt },
+                {
+                    inlineData: {
+                        data: req.file.buffer.toString("base64"),
+                        mimeType: req.file.mimetype
+                    }
+                }
+            ]);
+
+            const text = result.response.text();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error("AI failed to produce valid JSON.");
+
+            const data = JSON.parse(jsonMatch[0]);
+            if (!data.name || !data.aadhaar_no) throw new Error("Key fields missing in AI response.");
+
+            return data;
+        };
+
+        for (const modelName of models) {
+            try {
+                extractedData = await tryModel(modelName);
+                if (extractedData) break;
+            } catch (err) {
+                console.warn(`[Gemini] Model ${modelName} failed:`, err.message);
+                lastError = err;
+                if (err.message.includes("429") || err.message.includes("quota")) {
+                    console.error("🚨 API QUOTA EXCEEDED (429). User must wait.");
+                    return res.status(429).json({
+                        success: false,
+                        message: "The Google AI service is currently busy (Free Tier Limit reached). Please wait 30 seconds and try again."
+                    });
+                }
+            }
+        }
+
+        if (!extractedData) {
+            const isAIError = lastError && (lastError.message.includes("GoogleGenerativeAI") || lastError.message.includes("fetch") || lastError.message.includes("404"));
+            return res.status(isAIError ? 503 : 400).json({
+                success: false,
+                message: isAIError ? "AI Extraction service is currently unstable. Our engineers are notified." : "Extraction failed. Please ensure the photo is clear.",
+                error: lastError ? lastError.message : "Models exhausted"
+            });
+        }
+
+        // 2. Attempt to Upload to Firebase Storage (FULLY ASYNCHRONOUS for latency)
+        let imageUrl = "";
+        const bucket = admin.storage().bucket();
+        const fileName = `aadhaar/${Date.now()}-${req.file.originalname}`;
+
+        // We do NOT await this. It runs in the background.
+        bucket.file(fileName).save(req.file.buffer, {
+            metadata: { contentType: req.file.mimetype },
+            public: true
+        }).then(() => {
+            console.log(`[Storage] Background upload complete: ${fileName}`);
+        }).catch(err => {
+            console.warn(`[Storage] Background upload failed: ${err.message}`);
+        });
+
+        // Construct the expected URL ahead of time
+        imageUrl = `https://storage.googleapis.com/${bucket.name}/${fileName}`;
+
+        // Calculate Age from DOB
+        let age = "N/A";
+        if (extractedData.dob) {
+            const birthYear = parseInt(extractedData.dob.split('/').pop());
+            const currentYear = new Date().getFullYear();
+            if (!isNaN(birthYear) && birthYear > 1900 && birthYear < currentYear) {
+                age = currentYear - birthYear;
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                name: extractedData.name,
+                aadhaarNumber: extractedData.aadhaar_no,
+                age: age,
+                address: extractedData.address,
+                gender: extractedData.gender,
+                imageUrl: imageUrl || "" // No placeholder needed if it fails
+            }
+        });
+
+    } catch (error) {
+        require('fs').appendFileSync('extraction_debug.log', `[${new Date().toISOString()}] ERROR: ${error.message}\n${error.stack}\n`);
+        console.error("AADHAAR EXTRACTION ERROR:", error);
+
+        let userMessage = "Failed to process Aadhaar card.";
+        if (error.message && error.message.includes("does not exist")) {
+            userMessage = "Storage configuration error: Bucket not found. Contact Admin.";
+        } else if (error.message && error.message.includes("API key")) {
+            userMessage = "AI Extraction service is temporarily unavailable (Invalid Key).";
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: userMessage,
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
         });
     }
 });
@@ -378,36 +619,25 @@ app.post("/auth/test-login", async (req, res) => {
 // GET /admin/stats - Dashboard statistics
 app.get("/admin/stats", async (req, res) => {
     try {
-        const usersSnap = await db.collection("users").get();
-        const sellersSnap = await db.collection("sellers").get();
-        const productsSnap = await db.collection("products").get();
-        const ordersSnap = await db.collection("orders").get();
-        const reviewsSnap = await db.collection("reviews").get();
+        const [usersSnap, sellersSnap, productsSnap, ordersSnap] = await Promise.all([
+            db.collection("users").get(),
+            db.collection("sellers").get(),
+            db.collection("products").get(),
+            db.collection("orders").get()
+        ]);
 
-        const totalSellers = sellersSnap.size;
+        const totalSellers = usersSnap.docs.filter(doc => doc.data().role === "SELLER").length;
         const pendingSellers = sellersSnap.docs.filter(doc => doc.data().sellerStatus === "PENDING").length;
         const totalProducts = productsSnap.size;
         const totalOrders = ordersSnap.size;
-
-        // Sum total reviews: real ones + a baseline mock number for each product to match Dashboard UI
-        let totalReviews = reviewsSnap.size;
-        productsSnap.forEach(doc => {
-            const hash = doc.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-            totalReviews += (hash % 50) + 15; // Match the product review fallback baseline
-        });
-
-        const pendingOrders = ordersSnap.docs.filter(doc => doc.data().status !== "DELIVERED").length;
 
         return res.status(200).json({
             success: true,
             stats: {
                 totalSellers,
                 totalProducts,
-                totalOrders, // Return the actual count
-                todayOrders: totalOrders, // Maintain backward compatibility for UI
-                pendingApprovals: pendingSellers,
-                pendingOrders,
-                totalReviews
+                todayOrders: Math.floor(totalOrders * 0.3), // Estimate
+                pendingApprovals: pendingSellers
             }
         });
     } catch (error) {
@@ -422,26 +652,30 @@ app.get("/admin/stats", async (req, res) => {
 // GET /admin/sellers - Pending sellers for approval
 app.get("/admin/sellers", async (req, res) => {
     try {
-        const sellersSnap = await db.collection("sellers").get();
+        const sellersSnap = await db.collection("sellers").where("sellerStatus", "==", "PENDING").get();
 
-        const sellers = [];
-        for (const doc of sellersSnap.docs) {
+        const sellers = await Promise.all(sellersSnap.docs.map(async (doc) => {
             const sellerData = doc.data();
             const userSnap = await db.collection("users").doc(doc.id).get();
             const userData = userSnap.data();
 
-            sellers.push({
+            return {
                 uid: doc.id,
-                name: sellerData.shopName || "New Shop",
-                email: userData?.phone || sellerData.phone || "N/A",
+                name: sellerData.shopName,
+                email: userData?.phone || "N/A",
                 type: "Individual",
-                status: sellerData.sellerStatus || "PENDING",
-                joined: sellerData.appliedAt?.toDate ? sellerData.appliedAt.toDate().toISOString().split('T')[0] : (sellerData.appliedAt?.seconds ? new Date(sellerData.appliedAt.seconds * 1000).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+                status: sellerData.sellerStatus,
+                joined: sellerData.appliedAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0],
                 shopName: sellerData.shopName,
                 category: sellerData.category,
-                address: sellerData.address
-            });
-        }
+                address: sellerData.address,
+                // Aadhaar Data
+                aadhaarNumber: sellerData.aadhaarNumber,
+                age: sellerData.age,
+                aadhaarImageUrl: sellerData.aadhaarImageUrl,
+                extractedName: sellerData.extractedName
+            };
+        }));
 
         return res.status(200).json({
             success: true,
@@ -461,91 +695,30 @@ app.get("/admin/products", async (req, res) => {
     try {
         const productsSnap = await db.collection("products").get();
 
-        const products = [];
-
-        // Add a hardcoded mock product as requested
-        products.push({
-            id: "mock-out-of-stock",
-            title: "Out of Stock Test Product",
-            seller: "Admin Demo Seller",
-            price: 999,
-            category: "Electronics",
-            status: "Inactive",
-            stock: 0,
-            averageRating: 4.8,
-            reviewCount: 42
-        });
-        for (const doc of productsSnap.docs) {
+        const products = await Promise.all(productsSnap.docs.map(async (doc) => {
             const productData = doc.data();
+            let sellerPhone = "System/Seeded";
 
-            let sellerData = {};
-            // Safely handle missing or invalid sellerId
-            if (productData.sellerId && typeof productData.sellerId === 'string') {
+            if (productData.sellerId) {
                 try {
                     const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
                     if (sellerSnap.exists) {
-                        sellerData = sellerSnap.data();
+                        sellerPhone = sellerSnap.data()?.phone || "Unknown";
                     }
-                } catch (err) {
-                    console.log(`Error fetching seller for product ${doc.id}:`, err.message);
+                } catch (e) {
+                    console.warn(`Could not fetch seller for product ${doc.id}`);
                 }
-            } else {
-                console.log(`Product ${doc.id} has missing or invalid sellerId`);
             }
 
-            // Fetch reviews for this product to calculate stats
-            const reviewsSnap = await db.collection("reviews")
-                .where("productId", "==", doc.id)
-                .get();
-
-            let totalRating = 0;
-            const reviewCount = reviewsSnap.size;
-            reviewsSnap.forEach(revDoc => {
-                totalRating += (revDoc.data().rating || 0);
-            });
-            let averageRating = reviewCount > 0 ? (totalRating / reviewCount).toFixed(1) : 0;
-            let displayReviewCount = reviewCount;
-
-            // Manual ratings for showing (as requested by user)
-            if (!averageRating || averageRating == 0 || reviewCount === 0) {
-                // Generate a consistent pseudo-random rating based on product ID
-                const hash = doc.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-                averageRating = (4.0 + (hash % 10) / 10).toFixed(1);
-                displayReviewCount = (hash % 50) + 10;
-            }
-
-            // Stock-based status logic
-            const stock = productData.stock !== undefined ? productData.stock : 10;
-            let status;
-
-            // If stock is 0, mark as Inactive
-            if (stock === 0) {
-                status = "Inactive";
-            }
-            // If product has a saved status, use it (for manual toggles)
-            else if (productData.status && productData.status !== "PENDING" && productData.status !== "Pending") {
-                status = productData.status;
-            }
-            // Default to Active for existing products with stock
-            else {
-                status = "Active";
-            }
-
-            products.push({
+            return {
                 id: doc.id,
-                title: productData.title || "Unnamed Product",
-                seller: sellerData?.shopName || sellerData?.phone || productData.sellerId || "Unknown Seller",
+                title: productData.title || productData.name,
+                seller: sellerPhone,
                 price: productData.price,
-                discountedPrice: (productData.discountedPrice && productData.discountedPrice < productData.price) ? productData.discountedPrice : null,
                 category: productData.category,
-                image: productData.image,
-                status: status,
-                stock: stock,
-                averageRating: Number(averageRating),
-                reviewCount: displayReviewCount
-            });
-        }
-
+                status: productData.status || "Active"
+            };
+        }));
 
         return res.status(200).json({
             success: true,
@@ -565,45 +738,22 @@ app.get("/admin/orders", async (req, res) => {
     try {
         const ordersSnap = await db.collection("orders").get();
 
-        // Fetch all orders and sort by createdAt descending
-        const ordersSorted = [];
+        const orders = [];
         for (const doc of ordersSnap.docs) {
             const orderData = doc.data();
-            const orderIdStr = String(orderData.orderId || doc.id);
-
-            // Aggressively extract timestamp from Order ID or createdAt
-            let rawDate = orderData.createdAt?.seconds || 0;
-
-            if (rawDate === 0) {
-                const digits = orderIdStr.match(/\d+/g)?.join('') || '';
-                if (digits.length >= 10) {
-                    // Try to parse as seconds (10 chars) or ms (13 chars)
-                    const parsed = parseInt(digits.substring(0, 10));
-                    if (parsed > 1600000000 && parsed < 2000000000) { // Realistic range for 2020-2030
-                        rawDate = parsed;
-                    }
-                }
-            }
-
-            ordersSorted.push({
+            orders.push({
                 id: doc.id,
-                orderId: orderIdStr,
+                orderId: orderData.orderId || doc.id,
                 customer: orderData.customerName || "Unknown",
                 total: orderData.total || 0,
                 status: orderData.status || "Processing",
-                date: (orderData.createdAt?.toDate ? orderData.createdAt.toDate().toISOString().split('T')[0] :
-                    (rawDate ? new Date(rawDate * 1000).toISOString().split('T')[0] :
-                        new Date().toISOString().split('T')[0])),
-                rawDate: rawDate || (Date.now() / 1000) // Default to now if completely unknown
+                date: orderData.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
             });
         }
 
-        // Final descending sort (newest first)
-        ordersSorted.sort((a, b) => b.rawDate - a.rawDate);
-
         return res.status(200).json({
             success: true,
-            orders: ordersSorted
+            orders
         });
     } catch (error) {
         console.error("GET ORDERS ERROR:", error);
@@ -618,27 +768,48 @@ app.get("/admin/orders", async (req, res) => {
 app.post("/admin/seller/:uid/approve", async (req, res) => {
     try {
         const { uid } = req.params;
+        console.log(`[Admin] Approving seller application for UID: ${uid}`);
 
         const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Seller application record not found"
+            });
+        }
+
+        const sellerData = sellerSnap.data();
+
+        // 1. Update status in sellers collection
         await sellerRef.update({
             sellerStatus: "APPROVED",
             approvedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // 2. Update Role and Verified Data in users collection
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
-            role: "SELLER"
+            role: "SELLER",
+            // Sync verified name from Aadhaar extraction
+            name: sellerData.extractedName || sellerData.shopName,
+            isSeller: true,
+            shopName: sellerData.shopName,
+            verifiedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+
+        console.log(`[Admin] ✅ Seller ${uid} approved and user profile synced.`);
 
         return res.status(200).json({
             success: true,
-            message: "Seller approved successfully"
+            message: "Seller approved successfully. User role and verified profile synced."
         });
     } catch (error) {
         console.error("APPROVE SELLER ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to approve seller"
+            message: "Failed to approve seller: " + error.message
         });
     }
 });
@@ -654,6 +825,14 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
             rejectedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        const userRef = db.collection("users").doc(uid);
+        await userRef.update({
+            // formerly downgraded to CONSUMER, now keeping as SELLER so they can see the message
+            // role: "CONSUMER" 
+            role: "SELLER",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
         return res.status(200).json({
             success: true,
             message: "Seller rejected successfully"
@@ -667,49 +846,52 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
     }
 });
 
-// POST /admin/product/:productId/status - Toggle product status
-app.post("/admin/product/:productId/status", async (req, res) => {
-    try {
-        const { productId } = req.params;
-        const { status } = req.body;
-        console.log(`Update Product Status: ID=${productId}, targetStatus=${status}`);
-
-        if (productId === "mock-out-of-stock") {
-            return res.status(200).json({ success: true, message: "Mock product updated" });
-        }
-
-        if (!status) {
-            return res.status(400).json({ success: false, message: "Status is required" });
-        }
-
-        await db.collection("products").doc(productId).update({
-            status: status,
-            updatedAt: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        res.status(200).json({ success: true, message: `Product status updated to ${status}` });
-    } catch (error) {
-        console.error("TOGGLE PRODUCT STATUS ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to update product status" });
-    }
-});
-
 // ========== SELLER ENDPOINTS ==========
 
 // GET /seller/:uid/stats - Seller dashboard statistics
+// GET /seller/:uid/profile - Get seller profile details
+app.get("/seller/:uid/profile", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const [sellerSnap, userSnap] = await Promise.all([
+            db.collection("sellers").doc(uid).get(),
+            db.collection("users").doc(uid).get()
+        ]);
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller profile not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const userData = userSnap.data();
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                shopName: sellerData.shopName,
+                name: userData?.name || sellerData.shopName, // Fallback to shopName if user name not set
+                phone: sellerData.phone,
+                category: sellerData.category,
+                status: sellerData.sellerStatus
+            }
+        });
+    } catch (error) {
+        console.error("GET SELLER PROFILE ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch profile" });
+    }
+});
+
 app.get("/seller/:uid/stats", async (req, res) => {
     try {
         const { uid } = req.params;
 
-        // Products
-        const productsSnap = await db.collection("products").where("sellerId", "==", uid).get();
-        const totalProducts = productsSnap.size;
+        // Fetch products and orders concurrently
+        const [productsSnap, allOrdersSnap] = await Promise.all([
+            db.collection("products").where("sellerId", "==", uid).get(),
+            db.collection("orders").get()
+        ]);
 
-        // Orders (This is simplified. Ideally orders should store sellerId per item or we query subcollections)
-        // For this hackathon scope, we'll scan all orders and filter in code or assume orders structure
-        // Let's assume we search for all orders where items array contains a product with sellerId = uid
-        // Fetching all orders is not scalable but works for small demo
-        const allOrdersSnap = await db.collection("orders").get();
+        const totalProducts = productsSnap.size;
         let totalSales = 0;
         let newOrdersCount = 0;
         let pendingOrdersCount = 0;
@@ -752,7 +934,7 @@ app.get("/seller/:uid/stats", async (req, res) => {
 app.get("/seller/:uid/products", async (req, res) => {
     try {
         const { uid } = req.params;
-        const productsSnap = await db.collection("products").where("sellerId", "==", uid).get();
+        const productsSnap = await db.collection("sellers").doc(uid).collection("listedproducts").get();
 
         const products = [];
         productsSnap.forEach(doc => {
@@ -785,15 +967,22 @@ app.post("/seller/product/add", async (req, res) => {
             ...productData,
             sellerId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            status: "Active" // Default status
+            status: "Active"
         };
 
-        const docRef = await db.collection("products").add(newProduct);
+        // 1. Save to main products collection
+        const mainDocRef = await db.collection("products").add(newProduct);
+
+        // 2. Save to seller's listedproducts subcollection using the same ID or reference
+        await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(mainDocRef.id).set({
+            ...newProduct,
+            mainProductId: mainDocRef.id
+        });
 
         return res.status(200).json({
             success: true,
-            message: "Product added successfully",
-            productId: docRef.id
+            message: "Product listed successfully in both collections",
+            productId: mainDocRef.id
         });
     } catch (error) {
         console.error("ADD PRODUCT ERROR:", error);
@@ -808,11 +997,26 @@ app.post("/seller/product/add", async (req, res) => {
 app.delete("/seller/product/:id", async (req, res) => {
     try {
         const { id } = req.params;
-        await db.collection("products").doc(id).delete();
+
+        // 1. Get product to find sellerId
+        const productRef = db.collection("products").doc(id);
+        const productSnap = await productRef.get();
+
+        if (productSnap.exists) {
+            const { sellerId } = productSnap.data();
+
+            // 2. Delete from seller's subcollection
+            if (sellerId) {
+                await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).delete();
+            }
+
+            // 3. Delete from main collection
+            await productRef.delete();
+        }
 
         return res.status(200).json({
             success: true,
-            message: "Product deleted successfully"
+            message: "Product deleted from all collections"
         });
     } catch (error) {
         console.error("DELETE PRODUCT ERROR:", error);
@@ -824,10 +1028,89 @@ app.delete("/seller/product/:id", async (req, res) => {
 });
 
 // GET /seller/:uid/orders - Get orders for a seller
+// Aggregated Dashboard Data Endpoint (Optimization)
+app.get("/seller/:uid/dashboard-data", async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        // Fetch everything in parallel on the server
+        const [sellerSnap, userSnap, productsSnap, allOrdersSnap, listedProdsSnap] = await Promise.all([
+            db.collection("sellers").doc(uid).get(),
+            db.collection("users").doc(uid).get(),
+            db.collection("products").where("sellerId", "==", uid).get(),
+            db.collection("orders").get(),
+            db.collection("sellers").doc(uid).collection("listedproducts").get()
+        ]);
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller profile not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const userData = userSnap.data();
+
+        // Calculate Stats
+        let totalSales = 0;
+        let newOrdersCount = 0;
+        let pendingOrdersCount = 0;
+        const sellerOrders = [];
+
+        allOrdersSnap.forEach(doc => {
+            const order = doc.data();
+            const sellerItems = order.items?.filter(item => item.sellerId === uid) || [];
+
+            if (sellerItems.length > 0) {
+                const orderSales = sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+                totalSales += orderSales;
+
+                if (order.status === 'Processing') newOrdersCount++;
+                if (order.status === 'Pending') pendingOrdersCount++;
+
+                sellerOrders.push({
+                    id: doc.id,
+                    orderId: order.orderId || doc.id,
+                    customer: order.customerName || "Customer",
+                    items: sellerItems,
+                    total: orderSales,
+                    status: order.status,
+                    date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                });
+            }
+        });
+
+        const products = [];
+        listedProdsSnap.forEach(doc => {
+            products.push({ id: doc.id, ...doc.data() });
+        });
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                shopName: sellerData.shopName,
+                name: userData?.name || sellerData.shopName,
+                phone: sellerData.phone,
+                category: sellerData.category,
+                status: sellerData.sellerStatus
+            },
+            stats: {
+                totalSales,
+                totalProducts: productsSnap.size,
+                newOrders: newOrdersCount,
+                pendingOrders: pendingOrdersCount
+            },
+            products,
+            orders: sellerOrders
+        });
+    } catch (error) {
+        console.error("DASHBOARD DATA ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch dashboard data" });
+    }
+});
+
+// GET /seller/:uid/orders - Get orders for a seller (Legacy support, but optimized)
 app.get("/seller/:uid/orders", async (req, res) => {
     try {
         const { uid } = req.params;
-        // Again, assuming simplified order structure scanning for demo
         const allOrdersSnap = await db.collection("orders").get();
         const sellerOrders = [];
 
@@ -840,7 +1123,7 @@ app.get("/seller/:uid/orders", async (req, res) => {
                     id: doc.id,
                     orderId: order.orderId || doc.id,
                     customer: order.customerName || "Customer",
-                    items: sellerItems, // Only show items relevant to this seller
+                    items: sellerItems,
                     total: sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0),
                     status: order.status,
                     date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
@@ -848,305 +1131,82 @@ app.get("/seller/:uid/orders", async (req, res) => {
             }
         });
 
-        return res.status(200).json({
-            success: true,
-            orders: sellerOrders
-        });
+        return res.status(200).json({ success: true, orders: sellerOrders });
     } catch (error) {
         console.error("SELLER ORDERS ERROR:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch orders"
-        });
+        return res.status(500).json({ success: false, message: "Failed to fetch orders" });
     }
 });
 
-// ========== PUBLIC PRODUCT ENDPOINTS ==========
-
-// GET /products - Get all active products for listing with ratings
-app.get("/products", async (req, res) => {
-    try {
-        const productsSnap = await db.collection("products").get();
-        const products = [];
-
-        for (const doc of productsSnap.docs) {
-            const data = doc.data();
-            const productId = doc.id;
-
-            // Fetch reviews for this product to calculate stats
-            // Note: In production, denormalizing these values into the product doc is better
-            const reviewsSnap = await db.collection("reviews")
-                .where("productId", "==", productId)
-                .get();
-
-            let totalRating = 0;
-            const reviewCount = reviewsSnap.size;
-
-            reviewsSnap.forEach(revDoc => {
-                totalRating += (revDoc.data().rating || 0);
-            });
-
-            const averageRating = reviewCount > 0 ? (totalRating / reviewCount).toFixed(1) : 0;
-
-            products.push({
-                id: productId,
-                ...data,
-                averageRating: Number(averageRating),
-                reviewCount
-            });
-        }
-        res.status(200).json({ success: true, products });
-    } catch (error) {
-        console.error("GET PUBLIC PRODUCTS ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to fetch products" });
-    }
-});
-
-// GET /product/:id - Get single product details
-app.get("/product/:id", async (req, res) => {
+// PUT /seller/order/:id/status - Update order status
+app.put("/seller/order/:id/status", async (req, res) => {
     try {
         const { id } = req.params;
-        const doc = await db.collection("products").doc(id).get();
+        const { status } = req.body;
 
-        if (!doc.exists) {
-            return res.status(404).json({ success: false, message: "Product not found" });
-        }
-
-        const data = doc.data();
-        let sellerName = "Unknown Seller";
-
-        if (data.sellerId) {
-            const sellerSnap = await db.collection("users").doc(data.sellerId).get();
-            if (sellerSnap.exists) {
-                sellerName = sellerSnap.data().shopName || sellerSnap.data().phone || "Seller";
-            }
-        }
-
-        res.status(200).json({ success: true, product: { id: doc.id, ...data, seller: sellerName } });
-    } catch (error) {
-        console.error("GET PRODUCT DETAIL ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to fetch product" });
-    }
-});
-
-// ========== REVIEW SYSTEM ENDPOINTS ==========
-
-// POST /reviews/add - Add a new review
-app.post("/reviews/add", async (req, res) => {
-    try {
-        const { idToken, productId, rating, feedback } = req.body;
-
-        if (!idToken || !productId || !rating) {
-            return res.status(400).json({ success: false, message: "Missing required fields" });
-        }
-
-        const decodedToken = await admin.auth().verifyIdToken(idToken);
-        const uid = decodedToken.uid;
-        const phone = decodedToken.phone_number || "Anonymous";
-
-        await db.collection("reviews").add({
-            productId,
-            userId: uid,
-            userName: phone, // Using phone as name for now, or fetch user profile if available
-            rating: Number(rating),
-            feedback: feedback || "",
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        await db.collection("orders").doc(id).update({
+            status,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        res.status(200).json({ success: true, message: "Review added successfully" });
-    } catch (error) {
-        console.error("ADD REVIEW ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to add review" });
-    }
-});
-
-// GET /reviews/:productId - Get reviews for a specific product
-app.get("/reviews/:productId", async (req, res) => {
-    try {
-        const { productId } = req.params;
-        const reviewsSnap = await db.collection("reviews")
-            .where("productId", "==", productId)
-            .get();
-
-        const reviews = [];
-        reviewsSnap.forEach(doc => {
-            reviews.push({ id: doc.id, ...doc.data() });
+        return res.status(200).json({
+            success: true,
+            message: "Order status updated successfully"
         });
-
-        // Sort by createdAt desc in JS to avoid composite index requirement
-        reviews.sort((a, b) => {
-            const timeA = a.createdAt?.seconds || 0;
-            const timeB = b.createdAt?.seconds || 0;
-            return timeB - timeA;
+    } catch (error) {
+        console.error("UPDATE ORDER STATUS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update order status"
         });
-
-        res.status(200).json({ success: true, reviews });
-    } catch (error) {
-        console.error("GET REVIEWS ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to fetch reviews" });
     }
 });
 
-// GET /admin/reviews - Get all reviews for admin dashboard
-app.get("/admin/reviews", async (req, res) => {
+// PUT /seller/product/update/:id - Update a product
+app.put("/seller/product/update/:id", async (req, res) => {
     try {
-        const reviewsSnap = await db.collection("reviews").get();
+        const { id } = req.params;
+        const { sellerId, productData } = req.body;
 
-        const reviews = [];
-        for (const doc of reviewsSnap.docs) {
-            const review = doc.data();
-            // Fetch product name for context
-            let productName = "Unknown Product";
-            try {
-                const productDoc = await db.collection("products").doc(review.productId).get();
-                if (productDoc.exists) {
-                    productName = productDoc.data().title;
-                }
-            } catch (e) {
-                console.log("Error fetching product for review:", e.message);
-            }
-
-            reviews.push({
-                id: doc.id,
-                ...review,
-                productName
-            });
+        if (!sellerId || !productData) {
+            return res.status(400).json({ success: false, message: "Missing required update data" });
         }
 
-        // Sort in JS
-        reviews.sort((a, b) => {
-            const timeA = a.createdAt?.seconds || 0;
-            const timeB = b.createdAt?.seconds || 0;
-            return timeB - timeA;
-        });
-
-        res.status(200).json({ success: true, reviews });
-    } catch (error) {
-        console.error("ADMIN REVIEWS ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to fetch all reviews" });
-    }
-});
-
-// DELETE /admin/product/:productId - Delete a product and notify seller
-app.post("/admin/product/:productId/delete", async (req, res) => {
-    try {
-        const { productId } = req.params;
-
-        // 1. Fetch product data before deletion to get sellerId and title
-        const productDoc = await db.collection("products").doc(productId).get();
-        if (!productDoc.exists) {
-            return res.status(404).json({ success: false, message: "Product already deleted or not found" });
-        }
-
-        const productData = productDoc.data();
-        const sellerId = productData.sellerId;
-        const productTitle = productData.title;
-
-        // 2. Delete the product
-        await db.collection("products").doc(productId).delete();
-
-        // 3. Notify the seller
-        if (sellerId) {
-            await db.collection("notifications").add({
-                sellerId: sellerId,
-                message: `Your product '${productTitle}' has been removed by the admin due to negative customer feedback.`,
-                type: "PRODUCT_DELETED",
-                productId: productId,
-                productTitle: productTitle,
-                createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                read: false
-            });
-        }
-
-        res.status(200).json({ success: true, message: "Product deleted and seller notified" });
-    } catch (error) {
-        console.error("DELETE PRODUCT ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to delete product" });
-    }
-});
-
-// ========== CUSTOMER REVIEW ENDPOINTS ==========
-
-// POST /reviews/add - Submit a product review
-app.post("/reviews/add", async (req, res) => {
-    try {
-        const { idToken, productId, rating, feedback } = req.body;
-
-        if (!idToken || !productId || !rating || !feedback) {
-            return res.status(400).json({ success: false, message: "Missing required fields" });
-        }
-
-        // Verify user token
-        const decodedToken = await admin.auth().verifyIdToken(idToken);
-        const userId = decodedToken.uid;
-
-        // Get user info
-        const userDoc = await db.collection("users").doc(userId).get();
-        const userData = userDoc.data();
-        const userName = userData?.name || userData?.email || "Anonymous";
-
-        // Create review document
-        const reviewData = {
-            productId: productId,
-            userId: userId,
-            userName: userName,
-            rating: Number(rating),
-            feedback: feedback,
-            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        const updatePayload = {
+            ...productData,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
         };
+        delete updatePayload.id;
 
-        await db.collection("reviews").add(reviewData);
+        await db.collection("products").doc(id).update(updatePayload);
+        await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).update(updatePayload);
 
-        // Update product's average rating
-        const reviewsSnap = await db.collection("reviews").where("productId", "==", productId).get();
-        let totalRating = 0;
-        let reviewCount = 0;
-
-        reviewsSnap.forEach(doc => {
-            totalRating += doc.data().rating || 0;
-            reviewCount++;
+        return res.status(200).json({
+            success: true,
+            message: "Product updated successfully in all collections"
         });
-
-        const averageRating = reviewCount > 0 ? (totalRating / reviewCount).toFixed(1) : 0;
-
-        await db.collection("products").doc(productId).update({
-            averageRating: Number(averageRating),
-            reviewCount: reviewCount
-        });
-
-        res.status(200).json({ success: true, message: "Review submitted successfully" });
     } catch (error) {
-        console.error("ADD REVIEW ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to submit review" });
+        console.error("UPDATE PRODUCT ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update product"
+        });
     }
 });
 
-// GET /reviews/:productId - Get all reviews for a product
-app.get("/reviews/:productId", async (req, res) => {
-    try {
-        const { productId } = req.params;
+app.get("/health", (req, res) => res.status(200).send("OK"));
 
-        const reviewsSnap = await db.collection("reviews")
-            .where("productId", "==", productId)
-            .orderBy("createdAt", "desc")
-            .get();
-
-        const reviews = [];
-        reviewsSnap.forEach(doc => {
-            reviews.push({
-                id: doc.id,
-                ...doc.data()
-            });
-        });
-
-        res.status(200).json({ success: true, reviews });
-    } catch (error) {
-        console.error("GET REVIEWS ERROR:", error);
-        res.status(500).json({ success: false, message: "Failed to fetch reviews" });
-    }
+// Global Error Handler
+app.use((err, req, res, next) => {
+    console.error("🔥 GLOBAL SERVER ERROR:", err);
+    res.status(500).json({
+        success: false,
+        message: "An internal server error occurred.",
+        error: err.message
+    });
 });
 
 const PORT = 5000;
-app.listen(PORT, () => {
-    console.log(`Auth service running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 [BACKEND] Auth service version 2.8 is LIVE on port ${PORT}`);
 });

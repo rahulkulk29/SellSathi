@@ -2,6 +2,12 @@ node_modules/
 .env
 .env.local
 serviceAccountKey.json
+<<<<<<< HEAD
 *serviceAccountKey*.json
 dist/
 build/
+=======
+*.log
+dist/
+build/
+>>>>>>> 7d016499fef36b986f04789e5323f6a4fda4ee86

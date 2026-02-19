@@ -26,18 +26,18 @@ export default function Home() {
             await seedProducts(); // Run once to ensure data exists
 
             try {
-                const querySnapshot = await getDocs(collection(db, "products"));
-                const productsData = querySnapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                }));
+                const response = await fetch('http://localhost:5000/marketplace/products');
+                const data = await response.json();
 
-                setProducts(productsData);
-                setFilteredProducts(productsData);
+                if (data.success) {
+                    const finalProducts = data.products;
+                    setProducts(finalProducts);
+                    setFilteredProducts(finalProducts);
 
-                // Extract unique categories
-                const uniqueCategories = ['All', ...new Set(productsData.map(p => p.category))];
-                setCategories(uniqueCategories);
+                    // Extract unique categories
+                    const uniqueCategories = ['All', ...new Set(finalProducts.map(p => p.category))];
+                    setCategories(uniqueCategories);
+                }
 
                 setLoading(false);
             } catch (error) {
@@ -85,7 +85,11 @@ export default function Home() {
     }, [products, selectedCategory, priceRange, sortBy, searchQuery]);
 
     const handleAddToCart = async (product) => {
-        const result = await addToCart(product);
+        // Use discount price if available for the cart
+        const effectivePrice = product.discountPrice ? Number(product.discountPrice) : Number(product.price);
+        const productForCart = { ...product, price: effectivePrice };
+
+        const result = await addToCart(productForCart);
         if (result.success) {
             alert(result.message);
         } else {
@@ -235,10 +239,25 @@ export default function Home() {
 
                                         <div style={{ marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                                             <div>
-                                                <span className="text-muted" style={{ fontSize: '0.8rem', textDecoration: 'line-through' }}>₹{Math.round(product.price * 1.2)}</span>
-                                                <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text)' }}>
-                                                    ₹{product.price}
-                                                </div>
+                                                {product.discountPrice ? (
+                                                    <>
+                                                        <span className="text-muted" style={{ fontSize: '0.8rem', textDecoration: 'line-through', marginRight: '6px' }}>
+                                                            ₹{Number(product.price).toLocaleString('en-IN')}
+                                                        </span>
+                                                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--success)' }}>
+                                                            ₹{Number(product.discountPrice).toLocaleString('en-IN')}
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <span className="text-muted" style={{ fontSize: '0.8rem', textDecoration: 'line-through' }}>
+                                                            ₹{Math.round(product.price * 1.2).toLocaleString('en-IN')}
+                                                        </span>
+                                                        <div style={{ fontSize: '1.5rem', fontWeight: 'bold', color: 'var(--text)' }}>
+                                                            ₹{Number(product.price).toLocaleString('en-IN')}
+                                                        </div>
+                                                    </>
+                                                )}
                                             </div>
                                             <button
                                                 onClick={() => handleAddToCart(product)}

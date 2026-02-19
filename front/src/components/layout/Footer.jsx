@@ -1,39 +1,36 @@
 import { Link } from 'react-router-dom';
-import { useState } from 'react';
-import SellerAuthModal from '../common/SellerAuthModal';
+import { useState, useEffect } from 'react';
 
 export default function Footer() {
-    const [isSellerModalOpen, setIsSellerModalOpen] = useState(false);
+    const [user, setUser] = useState(null);
 
-    const handleBecomeSellerClick = () => {
-        // Check if user is logged in
-        const user = localStorage.getItem('user');
-        if (!user) {
-            alert('Please login as a customer first before becoming a seller');
-            return;
-        }
+    // Check localStorage on mount and listen for changes
+    useEffect(() => {
+        const checkUser = () => {
+            const userData = localStorage.getItem('user');
+            if (userData) {
+                try {
+                    setUser(JSON.parse(userData));
+                } catch (error) {
+                    console.error('Error parsing user data in footer:', error);
+                    setUser(null);
+                }
+            } else {
+                setUser(null);
+            }
+        };
 
-        const userData = JSON.parse(user);
+        checkUser();
 
-        // Check if user is already a seller
-        if (userData.role === 'SELLER') {
-            alert('You are already registered as a seller');
-            return;
-        }
+        const handleUserChange = () => {
+            checkUser();
+        };
 
-        // Check if user is admin
-        if (userData.role === 'ADMIN') {
-            alert('Admin cannot become a seller');
-            return;
-        }
-
-        // Open seller registration modal
-        setIsSellerModalOpen(true);
-    };
-
-    const handleSellerSuccess = () => {
-        setIsSellerModalOpen(false);
-    };
+        window.addEventListener('userDataChanged', handleUserChange);
+        return () => {
+            window.removeEventListener('userDataChanged', handleUserChange);
+        };
+    }, []);
 
     return (
         <footer style={{
@@ -67,31 +64,24 @@ export default function Footer() {
                         </ul>
                     </div>
 
-                    <div style={{ textAlign: 'right' }}>
-                        <h4>Earn with Us</h4>
+                    {user?.role !== 'SELLER' && (
                         <div style={{ marginTop: '1rem' }}>
-                            <button
-                                onClick={handleBecomeSellerClick}
+                            <Link
+                                to="/seller/register"
                                 className="btn btn-primary"
-                                style={{ cursor: 'pointer' }}
+                                style={{ display: 'inline-flex' }}
                             >
                                 Become a Seller
-                            </button>
+                            </Link>
                             <p className="text-muted" style={{ marginTop: '0.5rem' }}>Open your shop in minutes.</p>
                         </div>
-                    </div>
+                    )}
                 </div>
 
                 <div style={{ marginTop: '4rem', paddingTop: '2rem', borderTop: '1px solid var(--border)', textAlign: 'center' }}>
                     <p className="text-muted">&copy; 2026 SELLSATHI Inc. All rights reserved.</p>
                 </div>
             </div>
-
-            <SellerAuthModal
-                isOpen={isSellerModalOpen}
-                onClose={() => setIsSellerModalOpen(false)}
-                onSuccess={handleSellerSuccess}
-            />
         </footer>
     );
 }

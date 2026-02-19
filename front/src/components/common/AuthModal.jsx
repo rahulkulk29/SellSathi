@@ -159,7 +159,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
             if (isTestNumber && confirmationResult?.isTestMode) {
                 console.log("✓ TEST MODE VERIFICATION");
                 console.log("Calling /auth/test-login endpoint...");
-                
                 response = await fetch('http://localhost:5000/auth/test-login', {
                     method: 'POST',
                     headers: {
@@ -167,13 +166,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                     },
                     body: JSON.stringify({ phone: phoneNumber, otp }),
                 });
-                
                 console.log("Response status:", response.status);
             } else {
                 // Handle real Firebase mode
                 console.log("✗ FIREBASE MODE VERIFICATION");
                 console.log("Confirming with Firebase...");
-                
                 const result = await confirmationResult.confirm(otp);
                 const user = result.user;
                 const idToken = await user.getIdToken();
@@ -186,7 +183,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                     },
                     body: JSON.stringify({ idToken }),
                 });
-                
                 console.log("Response status:", response.status);
             }
 
@@ -234,11 +230,9 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                         console.log("✓ Approved seller - Redirecting to /seller/dashboard");
                         navigate('/seller/dashboard');
                     } else if (data.status === 'PENDING') {
-                        alert('Your seller application is pending approval');
-                        navigate('/');
+                        navigate('/seller/dashboard');
                     } else if (data.status === 'REJECTED') {
-                        alert('Your seller application was rejected');
-                        navigate('/');
+                        navigate('/seller/dashboard');
                     }
                 } else {
                     // CONSUMER role or any other role
@@ -249,6 +243,16 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                 if (onSuccess) {
                     onSuccess(data);
                 }
+
+                // Clear state
+                setStep('phone');
+                setPhone('');
+                setOtp('');
+                setError('');
+                setConfirmationResult(null);
+                setIsTestNumber(false);
+                cleanupRecaptcha();
+
                 onClose();
                 console.log("=== OTP VERIFICATION END (SUCCESS) ===");
             } else {
@@ -326,9 +330,12 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                         }}>
                             {step === 'phone' ? <Phone color="var(--primary)" /> : <ShieldCheck color="var(--primary)" />}
                         </div>
-                        <h2 style={{ fontSize: '1.5rem' }}>{step === 'phone' ? 'Welcome to ' : 'Verify '} <span className="gradient-text">SELLSATHI</span></h2>
+                        <h2 style={{ fontSize: '1.5rem' }}>
+                            {localStorage.getItem('user') && step === 'phone' ? 'Account ' : (step === 'phone' ? 'Welcome to ' : 'Verify ')}
+                            <span className="gradient-text">SELLSATHI</span>
+                        </h2>
                         <p className="text-muted" style={{ fontSize: '0.875rem' }}>
-                            {step === 'phone' ? 'Enter your mobile number to get started' : `Enter the 6-digit OTP sent to +91${phone}`}
+                            {localStorage.getItem('user') && step === 'phone' ? 'Your session is active' : (step === 'phone' ? 'Enter your mobile number to get started' : `Enter the 6-digit OTP sent to +91${phone}`)}
                         </p>
                     </div>
 
@@ -347,65 +354,104 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                         </div>
                     )}
 
-                    <form onSubmit={step === 'phone' ? handleSendOTP : handleVerify}>
-                        {step === 'phone' ? (
-                            <div className="flex flex-col gap-4">
-                                <div style={{ position: 'relative' }}>
-                                    <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: '600', opacity: 0.7 }}>+91</span>
+                    {localStorage.getItem('user') && step === 'phone' ? (
+                        <div style={{ textAlign: 'center' }}>
+                            <div style={{
+                                padding: '1.5rem',
+                                background: 'hsla(230, 85%, 60%, 0.05)',
+                                borderRadius: '12px',
+                                marginBottom: '2rem',
+                                border: '1px solid var(--border)'
+                            }}>
+                                <p style={{ fontSize: '0.875rem', color: 'var(--text-muted)', marginBottom: '0.5rem' }}>Currently Logged In</p>
+                                <p style={{ fontSize: '1.25rem', fontWeight: 'bold', margin: '0.5rem 0' }}>
+                                    {JSON.parse(localStorage.getItem('user')).phone}
+                                </p>
+                                <span style={{
+                                    fontSize: '0.75rem',
+                                    padding: '4px 12px',
+                                    backgroundColor: 'var(--primary)',
+                                    color: 'white',
+                                    borderRadius: '20px',
+                                    fontWeight: 'bold',
+                                    textTransform: 'uppercase'
+                                }}>
+                                    {JSON.parse(localStorage.getItem('user')).role}
+                                </span>
+                            </div>
+                            <button
+                                onClick={() => {
+                                    localStorage.removeItem('user');
+                                    window.dispatchEvent(new CustomEvent('userDataChanged'));
+                                    setStep('phone');
+                                }}
+                                className="btn btn-secondary"
+                                style={{ width: '100%', marginBottom: '1rem' }}
+                            >
+                                Login as Another User
+                            </button>
+                        </div>
+                    ) : (
+                        <form onSubmit={step === 'phone' ? handleSendOTP : handleVerify}>
+                            {step === 'phone' ? (
+                                <div className="flex flex-col gap-4">
+                                    <div style={{ position: 'relative' }}>
+                                        <span style={{ position: 'absolute', left: '1rem', top: '50%', transform: 'translateY(-50%)', fontWeight: '600', opacity: 0.7 }}>+91</span>
+                                        <input
+                                            type="tel"
+                                            placeholder="Mobile Number"
+                                            value={phone}
+                                            onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
+                                            style={{ paddingLeft: '3.5rem', width: '100%' }}
+                                            required
+                                            disabled={loading}
+                                        />
+                                    </div>
+                                    <button
+                                        type="submit"
+                                        className="btn btn-primary"
+                                        style={{ width: '100%', padding: '1rem' }}
+                                        disabled={phone.length < 10 || loading}
+                                    >
+                                        {loading ? 'Sending...' : 'Get OTP'}
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex flex-col gap-4">
                                     <input
-                                        type="tel"
-                                        placeholder="Mobile Number"
-                                        value={phone}
-                                        onChange={e => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                                        style={{ paddingLeft: '3.5rem', width: '100%' }}
+                                        type="text"
+                                        placeholder="Enter 6-digit OTP"
+                                        value={otp}
+                                        onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                                        style={{ textAlign: 'center', letterSpacing: '0.5rem', fontSize: '1.25rem', fontWeight: 'bold', width: '100%' }}
                                         required
                                         disabled={loading}
                                     />
+                                    <button
+                                        type="submit"
+                                        className="btn btn-primary"
+                                        style={{ width: '100%', padding: '1rem' }}
+                                        disabled={otp.length < 6 || loading}
+                                    >
+                                        {loading ? 'Verifying...' : 'Continue'} {!loading && <ArrowRight size={18} />}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setStep('phone');
+                                            setOtp('');
+                                            setError('');
+                                            setIsTestNumber(false);
+                                        }}
+                                        style={{ fontSize: '0.875rem', color: 'var(--primary)', fontWeight: '600' }}
+                                        disabled={loading}
+                                    >
+                                        Change Number
+                                    </button>
                                 </div>
-                                <button
-                                    type="submit"
-                                    className="btn btn-primary"
-                                    style={{ width: '100%', padding: '1rem' }}
-                                    disabled={phone.length < 10 || loading}
-                                >
-                                    {loading ? 'Sending...' : 'Get OTP'}
-                                </button>
-                            </div>
-                        ) : (
-                            <div className="flex flex-col gap-4">
-                                <input
-                                    type="text"
-                                    placeholder="Enter 6-digit OTP"
-                                    value={otp}
-                                    onChange={e => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                                    style={{ textAlign: 'center', letterSpacing: '0.5rem', fontSize: '1.25rem', fontWeight: 'bold', width: '100%' }}
-                                    required
-                                    disabled={loading}
-                                />
-                                <button
-                                    type="submit"
-                                    className="btn btn-primary"
-                                    style={{ width: '100%', padding: '1rem' }}
-                                    disabled={otp.length < 6 || loading}
-                                >
-                                    {loading ? 'Verifying...' : 'Continue'} {!loading && <ArrowRight size={18} />}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        setStep('phone');
-                                        setOtp('');
-                                        setError('');
-                                        setIsTestNumber(false);
-                                    }}
-                                    style={{ fontSize: '0.875rem', color: 'var(--primary)', fontWeight: '600' }}
-                                    disabled={loading}
-                                >
-                                    Change Number
-                                </button>
-                            </div>
-                        )}
-                    </form>
+                            )}
+                        </form>
+                    )}
 
                     <div id="recaptcha-container"></div>
 

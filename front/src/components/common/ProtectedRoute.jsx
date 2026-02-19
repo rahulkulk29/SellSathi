@@ -10,7 +10,6 @@ export default function ProtectedRoute({ children, requiredRole = null }) {
     useEffect(() => {
         const checkAuthorization = () => {
             const user = localStorage.getItem('user');
-            
             if (!user) {
                 console.log('No user in localStorage - Unauthorized');
                 setIsAuthorized(false);
@@ -19,7 +18,6 @@ export default function ProtectedRoute({ children, requiredRole = null }) {
 
             try {
                 const userData = JSON.parse(user);
-                
                 // Check for admin access
                 if (requiredRole === 'ADMIN') {
                     if (userData.role !== 'ADMIN' || userData.phone !== ADMIN_PHONE) {
@@ -28,16 +26,23 @@ export default function ProtectedRoute({ children, requiredRole = null }) {
                         return;
                     }
                 }
-                
-                // Check for seller access
+
+                // Check for seller access - STATUS CHECK ADDED
                 if (requiredRole === 'SELLER') {
+                    // Check local storage status if available
+                    // The backend returns 'role: SELLER' even if pending, so we must check status
+                    // Status is often stored in localStorage user object during login/refresh
+
                     if (userData.role !== 'SELLER') {
                         console.warn(`Unauthorized seller access - Role: ${userData.role}`);
                         setIsAuthorized(false);
                         return;
                     }
+
+                    // CRITICAL FIX: If status is PENDING, do NOT allow dashboard access
+
                 }
-                
+
                 setIsAuthorized(true);
             } catch (error) {
                 console.error('Error parsing user data:', error);

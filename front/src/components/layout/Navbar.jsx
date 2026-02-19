@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { ShoppingCart, User, Search, LogOut, ChevronDown } from 'lucide-react';
+import { ShoppingCart, User, Search, LogOut, ChevronDown, LayoutDashboard } from 'lucide-react';
 import AuthModal from '../common/AuthModal';
 
 export default function Navbar() {
@@ -96,6 +96,40 @@ export default function Navbar() {
 
                 <div className="flex gap-4 items-center">
                     <Link to="/checkout" className="btn btn-secondary icon-btn"><ShoppingCart size={20} /></Link>
+
+                    {user?.role === 'CONSUMER' && (
+                        <Link
+                            to="/seller/register"
+                            className="btn btn-primary"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.5rem 1rem',
+                                marginRight: '0.5rem'
+                            }}
+                        >
+                            Become a Seller
+                        </Link>
+                    )}
+
+                    {(user?.role === 'SELLER' || user?.role === 'ADMIN') &&
+                        !location.pathname.startsWith(user.role === 'ADMIN' ? '/admin' : '/seller/dashboard') && (
+                            <Link
+                                to={user.role === 'ADMIN' ? "/admin" : "/seller/dashboard"}
+                                className="btn btn-primary"
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.5rem',
+                                    padding: '0.5rem 1rem',
+                                    marginRight: '0.5rem'
+                                }}
+                            >
+                                <LayoutDashboard size={18} />
+                                <span>Dashboard</span>
+                            </Link>
+                        )}
 
                     {user ? (
                         <div style={{ position: 'relative' }}>
