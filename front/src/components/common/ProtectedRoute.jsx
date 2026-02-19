@@ -10,7 +10,6 @@ export default function ProtectedRoute({ children, requiredRole = null }) {
     useEffect(() => {
         const checkAuthorization = () => {
             const user = localStorage.getItem('user');
-
             if (!user) {
                 console.log('No user in localStorage - Unauthorized');
                 setIsAuthorized(false);
@@ -19,7 +18,6 @@ export default function ProtectedRoute({ children, requiredRole = null }) {
 
             try {
                 const userData = JSON.parse(user);
-
                 // Check for admin access
                 if (requiredRole === 'ADMIN') {
                     if (userData.role !== 'ADMIN' || userData.phone !== ADMIN_PHONE) {

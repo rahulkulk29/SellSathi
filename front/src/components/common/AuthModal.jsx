@@ -157,7 +157,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
             if (isTestNumber && confirmationResult?.isTestMode) {
                 console.log("✓ TEST MODE VERIFICATION");
                 console.log("Calling /auth/test-login endpoint...");
-
                 response = await fetch('http://localhost:5000/auth/test-login', {
                     method: 'POST',
                     headers: {
@@ -165,13 +164,11 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                     },
                     body: JSON.stringify({ phone: phoneNumber, otp }),
                 });
-
                 console.log("Response status:", response.status);
             } else {
                 // Handle real Firebase mode
                 console.log("✗ FIREBASE MODE VERIFICATION");
                 console.log("Confirming with Firebase...");
-
                 const result = await confirmationResult.confirm(otp);
                 const user = result.user;
                 const idToken = await user.getIdToken();
@@ -184,7 +181,6 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                     },
                     body: JSON.stringify({ idToken }),
                 });
-
                 console.log("Response status:", response.status);
             }
 
