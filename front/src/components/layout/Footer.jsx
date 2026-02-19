@@ -1,9 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useState, useEffect } from 'react';
-import SellerAuthModal from '../common/SellerAuthModal';
 
 export default function Footer() {
-    const [isSellerModalOpen, setIsSellerModalOpen] = useState(false);
     const [user, setUser] = useState(null);
 
     // Check localStorage on mount and listen for changes
@@ -33,33 +31,6 @@ export default function Footer() {
             window.removeEventListener('userDataChanged', handleUserChange);
         };
     }, []);
-
-    const handleBecomeSellerClick = () => {
-        if (!user) {
-            alert('Please login as a customer first before becoming a seller');
-            return;
-        }
-
-        // Check if user is already a seller
-        if (user.role === 'SELLER') {
-            alert('You are already registered as a seller');
-            return;
-        }
-
-        // Check if user is admin
-        if (user.role === 'ADMIN') {
-            alert('Admin cannot become a seller');
-            return;
-        }
-
-        // Open seller registration modal
-        setIsSellerModalOpen(true);
-    };
-
-    const handleSellerSuccess = () => {
-        setIsSellerModalOpen(false);
-        // Refresh user data is handled by the event listener
-    };
 
     return (
         <footer style={{
@@ -95,13 +66,13 @@ export default function Footer() {
 
                     {user?.role !== 'SELLER' && (
                         <div style={{ marginTop: '1rem' }}>
-                            <button
-                                onClick={handleBecomeSellerClick}
+                            <Link
+                                to="/seller/register"
                                 className="btn btn-primary"
-                                style={{ cursor: 'pointer' }}
+                                style={{ display: 'inline-flex' }}
                             >
                                 Become a Seller
-                            </button>
+                            </Link>
                             <p className="text-muted" style={{ marginTop: '0.5rem' }}>Open your shop in minutes.</p>
                         </div>
                     )}
@@ -111,12 +82,6 @@ export default function Footer() {
                     <p className="text-muted">&copy; 2026 SELLSATHI Inc. All rights reserved.</p>
                 </div>
             </div>
-
-            <SellerAuthModal
-                isOpen={isSellerModalOpen}
-                onClose={() => setIsSellerModalOpen(false)}
-                onSuccess={handleSellerSuccess}
-            />
         </footer>
     );
 }

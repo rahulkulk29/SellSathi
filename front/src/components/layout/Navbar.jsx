@@ -97,6 +97,22 @@ export default function Navbar() {
                 <div className="flex gap-4 items-center">
                     <Link to="/checkout" className="btn btn-secondary icon-btn"><ShoppingCart size={20} /></Link>
 
+                    {user?.role === 'CONSUMER' && (
+                        <Link
+                            to="/seller/register"
+                            className="btn btn-primary"
+                            style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.5rem',
+                                padding: '0.5rem 1rem',
+                                marginRight: '0.5rem'
+                            }}
+                        >
+                            Become a Seller
+                        </Link>
+                    )}
+
                     {(user?.role === 'SELLER' || user?.role === 'ADMIN') &&
                         !location.pathname.startsWith(user.role === 'ADMIN' ? '/admin' : '/seller/dashboard') && (
                             <Link

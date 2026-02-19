@@ -6,6 +6,7 @@ import Checkout from './pages/marketplace/Checkout';
 import OrderTracking from './pages/marketplace/OrderTracking';
 import SellerRegistration from './pages/seller/Registration';
 import SellerDashboard from './pages/seller/Dashboard';
+import AddProduct from './pages/seller/AddProduct';
 import AdminDashboard from './pages/admin/Dashboard';
 import AdminLogin from './pages/admin/Login';
 import Navbar from './components/layout/Navbar';
@@ -28,24 +29,32 @@ function App() {
 
             {/* Seller Routes */}
             <Route path="/seller/register" element={<SellerRegistration />} />
-            <Route 
-              path="/seller/dashboard/*" 
+            <Route
+              path="/seller/dashboard/*"
               element={
                 <ProtectedRoute requiredRole="SELLER">
                   <SellerDashboard />
                 </ProtectedRoute>
-              } 
+              }
+            />
+            <Route
+              path="/seller/add-product"
+              element={
+                <ProtectedRoute requiredRole="SELLER">
+                  <AddProduct />
+                </ProtectedRoute>
+              }
             />
 
             {/* Admin Routes */}
             <Route path="/admin/login" element={<AdminLogin />} />
-            <Route 
-              path="/admin/*" 
+            <Route
+              path="/admin/*"
               element={
                 <ProtectedRoute requiredRole="ADMIN">
                   <AdminDashboard />
                 </ProtectedRoute>
-              } 
+              }
             />
           </Routes>
         </main>

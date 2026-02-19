@@ -232,11 +232,9 @@ export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer
                         console.log("✓ Approved seller - Redirecting to /seller/dashboard");
                         navigate('/seller/dashboard');
                     } else if (data.status === 'PENDING') {
-                        alert('Your seller application is pending approval');
-                        navigate('/');
+                        navigate('/seller/dashboard');
                     } else if (data.status === 'REJECTED') {
-                        alert('Your seller application was rejected');
-                        navigate('/');
+                        navigate('/seller/dashboard');
                     }
                 } else {
                     // CONSUMER role or any other role

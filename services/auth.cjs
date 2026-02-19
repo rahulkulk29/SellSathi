@@ -1,23 +1,73 @@
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, ".env") });
+
+process.on('uncaughtException', (err) => {
+    console.error('🔥 UNCAUGHT EXCEPTION:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 UNHANDLED REJECTION at:', promise, 'reason:', reason);
+});
+
 const express = require("express");
 const admin = require("firebase-admin");
 const cors = require("cors");
+const multer = require("multer");
+const cloudinary = require('cloudinary').v2;
+const streamifier = require('streamifier');
+
+// Cloudinary Config
+const CLOUDINARY_CLOUD = process.env.CLOUDINARY_CLOUD_NAME || 'dhevauth5';
+const CLOUDINARY_KEY = process.env.CLOUDINARY_API_KEY || '511255263888482';
+const CLOUDINARY_SECRET = process.env.CLOUDINARY_API_SECRET || 'Lct_38d4lRzzsaY78EyB0KyWLDk';
+
+cloudinary.config({
+    cloud_name: CLOUDINARY_CLOUD,
+    api_key: CLOUDINARY_KEY,
+    api_secret: CLOUDINARY_SECRET
+});
+console.log(`☁️  Cloudinary configured: cloud_name=${CLOUDINARY_CLOUD}, api_key=${CLOUDINARY_KEY.substring(0, 4)}...`);
+
+const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 const app = express();
-app.use(cors()); // Enable CORS for all routes
-app.use(express.json());
+console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
+app.use(cors());
+app.use(bodyParser.json());
 
 admin.initializeApp({
     credential: admin.credential.cert(require("./serviceAccountKey.json")),
+    storageBucket: "sellsathi.firebasestorage.app"
 });
 
 const db = admin.firestore();
 
-// Single source of truth for admin phone number
-const ADMIN_PHONE = "+917483743936";
+// Gemini Configuration
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_KEY || GEMINI_KEY === 'your_gemini_api_key_here') {
+    console.warn("⚠️  WARNING: GEMINI_API_KEY is not set correctly in services/.env. Extraction will fail.");
+    console.log("Current keys in process.env:", Object.keys(process.env).filter(k => k.includes("API")));
+} else {
+    console.log("✅ GEMINI_API_KEY loaded successfully:", GEMINI_KEY.substring(0, 5) + "..." + GEMINI_KEY.substring(GEMINI_KEY.length - 4));
+}
+const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
-// Environment & test credentials (must be before middleware)
-const IS_DEV = process.env.NODE_ENV !== "production";
-const TEST_CREDENTIALS = IS_DEV ? {
+// Multer Setup for Memory Storage
+const storage = multer.memoryStorage();
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('image/')) {
+            cb(null, true);
+        } else {
+            cb(new Error('Only image files are allowed!'), false);
+        }
+    }
+});
+
+// TEST CREDENTIALS - For development/testing purposes only
+const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
     '+919876543210': { otp: '123456', role: 'CONSUMER' },
     '+919353469036': { otp: '741852', role: 'SELLER' },
@@ -168,6 +218,51 @@ app.get("/marketplace/products", async (req, res) => {
     }
 });
 
+// ============================================================
+// POST /seller/upload-image — Upload product image to Cloudinary
+// ============================================================
+app.post("/seller/upload-image", upload.single('image'), async (req, res) => {
+    console.log("📸 Product image upload request received");
+
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: "No image file provided" });
+    }
+
+    try {
+        const uploadResult = await new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                {
+                    folder: 'sellsathi/products',
+                    resource_type: 'image',
+                    transformation: [
+                        { width: 1200, height: 1200, crop: 'limit' },
+                        { quality: 'auto:good' },
+                        { fetch_format: 'auto' }
+                    ]
+                },
+                (error, result) => {
+                    if (error) reject(error);
+                    else resolve(result);
+                }
+            );
+            streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+        });
+
+        console.log("✅ Product image uploaded:", uploadResult.secure_url);
+        return res.status(200).json({
+            success: true,
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id
+        });
+    } catch (error) {
+        console.error("❌ Product image upload error:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Image upload failed: " + error.message
+        });
+    }
+});
+
 app.post("/auth/login", async (req, res) => {
     try {
         const { idToken } = req.body;
@@ -267,9 +362,10 @@ app.post("/auth/login", async (req, res) => {
             }
 
             if (sellerData.sellerStatus === "REJECTED") {
-                return res.status(403).json({
-                    success: false,
-                    role: "SELLER",
+                return res.status(200).json({
+                    success: true,
+                    uid,
+                    role: "SELLER", // KEEP AS SELLER so they can see the rejection message on dashboard
                     status: "REJECTED",
                     message: "Seller request rejected",
                 });
@@ -297,6 +393,7 @@ app.post("/auth/login", async (req, res) => {
 
 // Endpoint for seller application
 app.post("/auth/apply-seller", async (req, res) => {
+    console.log("HIT: /auth/apply-seller");
     try {
         const { idToken, sellerDetails } = req.body;
 
@@ -307,10 +404,15 @@ app.post("/auth/apply-seller", async (req, res) => {
             });
         }
 
-        if (!sellerDetails || !sellerDetails.shopName || !sellerDetails.category || !sellerDetails.address || !sellerDetails.phone) {
+        if (!sellerDetails || !sellerDetails.shopName || !sellerDetails.category || !sellerDetails.address) {
+            console.warn("REJECTED: Missing fields in apply-seller", {
+                shopName: sellerDetails?.shopName,
+                category: sellerDetails?.category,
+                address: sellerDetails?.address
+            });
             return res.status(400).json({
                 success: false,
-                message: "Shop name, category, address, and phone are required",
+                message: `Missing required fields: ${!sellerDetails.shopName ? 'Shop Name, ' : ''}${!sellerDetails.category ? 'Category, ' : ''}${!sellerDetails.address ? 'Address' : ''}`.replace(/, $/, ""),
             });
         }
 
@@ -329,13 +431,32 @@ app.post("/auth/apply-seller", async (req, res) => {
         }
 
         const userData = userSnap.data();
+        console.log(`[DEBUG] Registration attempt: UID=${uid}, Current Role from DB=${userData.role}`);
 
         // Check if user is already a seller
         if (userData.role === "SELLER") {
-            return res.status(400).json({
-                success: false,
-                message: "You are already registered as a seller",
-            });
+            const sellerRef = db.collection("sellers").doc(uid);
+            const sellerSnap = await sellerRef.get();
+
+            if (sellerSnap.exists) {
+                const sellerData = sellerSnap.data();
+                console.log(`[DEBUG] Apply-Seller MATCH: UID=${uid} | Role=${userData.role} | StatusChecked=${sellerData.sellerStatus}`);
+                if (sellerData.sellerStatus === "APPROVED") {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Database Alert: Your account (UID: ${uid.substring(0, 5)}...) is already registered as an APPROVED SELLER. You cannot apply again while this role is active.`,
+                    });
+                }
+                if (sellerData.sellerStatus === "PENDING") {
+                    return res.status(400).json({
+                        success: false,
+                        message: `Application Alert: You already have a PENDING seller application (UID: ${uid.substring(0, 5)}...). Please wait for admin approval.`,
+                    });
+                }
+                // If rejected, we allow re-application below
+            } else {
+                console.log(`[DEBUG] Role is SELLER but no document found in sellers collection for UID: ${uid}. Proceeding with application.`);
+            }
         }
 
         // Check if user is admin
@@ -355,6 +476,12 @@ app.post("/auth/apply-seller", async (req, res) => {
             category: sellerDetails.category,
             address: sellerDetails.address,
             gstNumber: sellerDetails.gstNumber || "",
+            // Aadhaar Specific Data
+            aadhaarNumber: sellerDetails.aadhaarNumber,
+            age: sellerDetails.age,
+            aadhaarImageUrl: sellerDetails.aadhaarImageUrl,
+            extractedName: sellerDetails.extractedName,
+
             sellerStatus: "PENDING",
             appliedAt: admin.firestore.FieldValue.serverTimestamp(),
             approvedAt: null,
@@ -380,6 +507,210 @@ app.post("/auth/apply-seller", async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Failed to submit seller application",
+        });
+    }
+});
+
+// GET /auth/user-status/:uid - Check application status
+app.get("/auth/user-status/:uid", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            return res.status(200).json({ success: true, status: 'NONE' });
+        }
+
+        const sellerData = sellerSnap.data();
+        console.log(`[DEBUG] User-Status check: UID=${uid} | StatusFound=${sellerData.sellerStatus}`);
+        return res.status(200).json({
+            success: true,
+            status: sellerData.sellerStatus // 'PENDING', 'APPROVED', 'REJECTED'
+        });
+    } catch (error) {
+        console.error("STATUS CHECK ERROR:", error);
+        return res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No file uploaded" });
+        }
+
+        console.log(`Processing Aadhaar extraction... [Size: ${(req.file.size / 1024 / 1024).toFixed(2)} MB]`);
+
+        // 1. Extract Data using Gemini - QUOTA OPTIMIZED (v2.8)
+        const models = ["gemini-flash-latest", "gemini-2.0-flash"];
+        let lastError = null;
+        let extractedData = null;
+
+        const tryModel = async (modelName) => {
+            console.log(`[Gemini] Attempting ${modelName}...`);
+            const model = genAI.getGenerativeModel({ model: modelName });
+            const prompt = `Strict JSON extraction from Aadhaar. Extract: name, aadhaar_no, dob, gender, address. Format: {"name": "...", "aadhaar_no": "...", "dob": "...", "gender": "...", "address": "..."}.`;
+
+            const result = await model.generateContent([
+                { text: prompt },
+                {
+                    inlineData: {
+                        data: req.file.buffer.toString("base64"),
+                        mimeType: req.file.mimetype
+                    }
+                }
+            ]);
+
+            const text = result.response.text();
+            const jsonMatch = text.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) throw new Error("AI failed to produce valid JSON.");
+
+            const data = JSON.parse(jsonMatch[0]);
+            if (!data.name || !data.aadhaar_no) throw new Error("Key fields missing in AI response.");
+
+            return data;
+        };
+
+        for (const modelName of models) {
+            try {
+                extractedData = await tryModel(modelName);
+                if (extractedData) break;
+            } catch (err) {
+                console.warn(`[Gemini] Model ${modelName} failed:`, err.message);
+                lastError = err;
+                if (err.message.includes("429") || err.message.includes("quota")) {
+                    console.error("🚨 API QUOTA EXCEEDED (429). User must wait.");
+                    return res.status(429).json({
+                        success: false,
+                        message: "The Google AI service is currently busy (Free Tier Limit reached). Please wait 30 seconds and try again."
+                    });
+                }
+            }
+        }
+
+        if (!extractedData) {
+            const isAIError = lastError && (lastError.message.includes("GoogleGenerativeAI") || lastError.message.includes("fetch") || lastError.message.includes("404"));
+            return res.status(isAIError ? 503 : 400).json({
+                success: false,
+                message: isAIError ? "AI Extraction service is currently unstable. Our engineers are notified." : "Extraction failed. Please ensure the photo is clear.",
+                error: lastError ? lastError.message : "Models exhausted"
+            });
+        }
+
+        // 2. Upload to Cloudinary (Aadhaar Image)
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "aadhaar_cards",
+                        resource_type: "image",
+                        public_id: `aadhaar_${Date.now()}` // Optional: custom ID
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            });
+        };
+
+        let imageUrl = "";
+        try {
+            console.log("[Cloudinary] Uploading Aadhaar image...");
+            const cloudResult = await uploadToCloudinary();
+            imageUrl = cloudResult.secure_url;
+            console.log(`[Cloudinary] Upload complete: ${imageUrl}`);
+        } catch (uploadErr) {
+            console.error("[Cloudinary] Upload failed:", uploadErr);
+            return res.status(500).json({
+                success: false,
+                message: "Image upload failed. Please try again.",
+                error: uploadErr.message || "Cloudinary Upload Error"
+            });
+        }
+
+        // Calculate Age from DOB
+        let age = "N/A";
+        if (extractedData.dob) {
+            const birthYear = parseInt(extractedData.dob.split('/').pop());
+            const currentYear = new Date().getFullYear();
+            if (!isNaN(birthYear) && birthYear > 1900 && birthYear < currentYear) {
+                age = currentYear - birthYear;
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            data: {
+                name: extractedData.name,
+                aadhaarNumber: extractedData.aadhaar_no,
+                age: age,
+                address: extractedData.address,
+                gender: extractedData.gender,
+                imageUrl: imageUrl || "" // No placeholder needed if it fails
+            }
+        });
+
+    } catch (error) {
+        require('fs').appendFileSync('extraction_debug.log', `[${new Date().toISOString()}] ERROR: ${error.message}\n${error.stack}\n`);
+        console.error("AADHAAR EXTRACTION ERROR:", error);
+
+        let userMessage = "Failed to process Aadhaar card.";
+        if (error.message && error.message.includes("does not exist")) {
+            userMessage = "Storage configuration error: Bucket not found. Contact Admin.";
+        } else if (error.message && error.message.includes("API key")) {
+            userMessage = "AI Extraction service is temporarily unavailable (Invalid Key).";
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: userMessage,
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
+
+// New Endpoint: Generic Image Upload to Cloudinary (for Products, etc.)
+app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
+    try {
+        if (!req.file) {
+            return res.status(400).json({ success: false, message: "No image file provided" });
+        }
+
+        const uploadToCloudinary = () => {
+            return new Promise((resolve, reject) => {
+                const uploadStream = cloudinary.uploader.upload_stream(
+                    {
+                        folder: "products", // Store in products folder
+                        resource_type: "image"
+                    },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            });
+        };
+
+        console.log("[Cloudinary] Uploading product image...");
+        const result = await uploadToCloudinary();
+        console.log(`[Cloudinary] Product image uploaded: ${result.secure_url}`);
+
+        return res.status(200).json({
+            success: true,
+            url: result.secure_url,
+            message: "Image uploaded successfully"
+        });
+
+    } catch (error) {
+        console.error("UPLOAD ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Image upload failed: " + error.message
         });
     }
 });
@@ -499,10 +830,12 @@ app.post("/auth/test-login", async (req, res) => {
 // GET /admin/stats - Dashboard statistics
 app.get("/admin/stats", verifyAuth, verifyAdmin, async (req, res) => {
     try {
-        const usersSnap = await db.collection("users").get();
-        const sellersSnap = await db.collection("sellers").get();
-        const productsSnap = await db.collection("products").get();
-        const ordersSnap = await db.collection("orders").get();
+        const [usersSnap, sellersSnap, productsSnap, ordersSnap] = await Promise.all([
+            db.collection("users").get(),
+            db.collection("sellers").get(),
+            db.collection("products").get(),
+            db.collection("orders").get()
+        ]);
 
         const totalSellers = usersSnap.docs.filter(doc => doc.data().role === "SELLER").length;
         const pendingSellers = sellersSnap.docs.filter(doc => doc.data().sellerStatus === "PENDING").length;
@@ -532,13 +865,12 @@ app.get("/admin/sellers", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const sellersSnap = await db.collection("sellers").where("sellerStatus", "==", "PENDING").get();
 
-        const sellers = [];
-        for (const doc of sellersSnap.docs) {
+        const sellers = await Promise.all(sellersSnap.docs.map(async (doc) => {
             const sellerData = doc.data();
             const userSnap = await db.collection("users").doc(doc.id).get();
             const userData = userSnap.data();
 
-            sellers.push({
+            return {
                 uid: doc.id,
                 name: sellerData.shopName,
                 email: userData?.phone || "N/A",
@@ -547,9 +879,14 @@ app.get("/admin/sellers", verifyAuth, verifyAdmin, async (req, res) => {
                 joined: safeToDateString(sellerData.appliedAt),
                 shopName: sellerData.shopName,
                 category: sellerData.category,
-                address: sellerData.address
-            });
-        }
+                address: sellerData.address,
+                // Aadhaar Data
+                aadhaarNumber: sellerData.aadhaarNumber,
+                age: sellerData.age,
+                aadhaarImageUrl: sellerData.aadhaarImageUrl,
+                extractedName: sellerData.extractedName
+            };
+        }));
 
         return res.status(200).json({
             success: true,
@@ -569,8 +906,7 @@ app.get("/admin/products", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const productsSnap = await db.collection("products").get();
 
-        const products = [];
-        for (const doc of productsSnap.docs) {
+        const products = await Promise.all(productsSnap.docs.map(async (doc) => {
             const productData = doc.data();
             let sellerPhone = "System/Seeded";
 
@@ -585,15 +921,15 @@ app.get("/admin/products", verifyAuth, verifyAdmin, async (req, res) => {
                 }
             }
 
-            products.push({
+            return {
                 id: doc.id,
                 title: productData.title || productData.name,
                 seller: sellerPhone,
                 price: productData.price,
                 category: productData.category,
                 status: productData.status || "Active"
-            });
-        }
+            };
+        }));
 
         return res.status(200).json({
             success: true,
@@ -643,36 +979,49 @@ app.get("/admin/orders", verifyAuth, verifyAdmin, async (req, res) => {
 app.post("/admin/seller/:uid/approve", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { uid } = req.params;
+        console.log(`[Admin] Approving seller application for UID: ${uid}`);
 
         // Verify seller document exists
         const sellerRef = db.collection("sellers").doc(uid);
         const sellerSnap = await sellerRef.get();
+
         if (!sellerSnap.exists) {
             return res.status(404).json({
                 success: false,
-                message: "Seller not found",
+                message: "Seller application record not found"
             });
         }
 
+        const sellerData = sellerSnap.data();
+
+        // 1. Update status in sellers collection
         await sellerRef.update({
             sellerStatus: "APPROVED",
             approvedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // 2. Update Role and Verified Data in users collection
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
-            role: "SELLER"
+            role: "SELLER",
+            // Sync verified name from Aadhaar extraction
+            name: sellerData.extractedName || sellerData.shopName,
+            isSeller: true,
+            shopName: sellerData.shopName,
+            verifiedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+
+        console.log(`[Admin] ✅ Seller ${uid} approved and user profile synced.`);
 
         return res.status(200).json({
             success: true,
-            message: "Seller approved successfully"
+            message: "Seller approved successfully. User role and verified profile synced."
         });
     } catch (error) {
         console.error("APPROVE SELLER ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to approve seller"
+            message: "Failed to approve seller: " + error.message
         });
     }
 });
@@ -697,6 +1046,14 @@ app.post("/admin/seller/:uid/reject", verifyAuth, verifyAdmin, async (req, res) 
             rejectedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        const userRef = db.collection("users").doc(uid);
+        await userRef.update({
+            // formerly downgraded to CONSUMER, now keeping as SELLER so they can see the message
+            // role: "CONSUMER" 
+            role: "SELLER",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
         return res.status(200).json({
             success: true,
             message: "Seller rejected successfully"
@@ -713,19 +1070,49 @@ app.post("/admin/seller/:uid/reject", verifyAuth, verifyAdmin, async (req, res) 
 // ========== SELLER ENDPOINTS ==========
 
 // GET /seller/:uid/stats - Seller dashboard statistics
-app.get("/seller/:uid/stats", verifyAuth, async (req, res) => {
+// GET /seller/:uid/profile - Get seller profile details
+app.get("/seller/:uid/profile", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const [sellerSnap, userSnap] = await Promise.all([
+            db.collection("sellers").doc(uid).get(),
+            db.collection("users").doc(uid).get()
+        ]);
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller profile not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const userData = userSnap.data();
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                shopName: sellerData.shopName,
+                name: userData?.name || sellerData.shopName, // Fallback to shopName if user name not set
+                phone: sellerData.phone,
+                category: sellerData.category,
+                status: sellerData.sellerStatus
+            }
+        });
+    } catch (error) {
+        console.error("GET SELLER PROFILE ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch profile" });
+    }
+});
+
+app.get("/seller/:uid/stats", async (req, res) => {
     try {
         const { uid } = req.params;
 
-        // Products
-        const productsSnap = await db.collection("products").where("sellerId", "==", uid).get();
-        const totalProducts = productsSnap.size;
+        // Fetch products and orders concurrently
+        const [productsSnap, allOrdersSnap] = await Promise.all([
+            db.collection("products").where("sellerId", "==", uid).get(),
+            db.collection("orders").get()
+        ]);
 
-        // Orders (This is simplified. Ideally orders should store sellerId per item or we query subcollections)
-        // For this hackathon scope, we'll scan all orders and filter in code or assume orders structure
-        // Let's assume we search for all orders where items array contains a product with sellerId = uid
-        // Fetching all orders is not scalable but works for small demo
-        const allOrdersSnap = await db.collection("orders").get();
+        const totalProducts = productsSnap.size;
         let totalSales = 0;
         let newOrdersCount = 0;
         let pendingOrdersCount = 0;
@@ -887,11 +1274,92 @@ app.delete("/seller/product/:id", verifyAuth, async (req, res) => {
     }
 });
 
-// GET /seller/:uid/orders - Get orders for a seller
-app.get("/seller/:uid/orders", verifyAuth, async (req, res) => {
+// GET /seller/:uid/orders - Get orders for// Aggregated Dashboard Data Endpoint (Optimization)
+app.get("/seller/:uid/dashboard-data", async (req, res) => {
     try {
         const { uid } = req.params;
-        // Again, assuming simplified order structure scanning for demo
+
+        // Fetch everything in parallel on the server
+        // Products come from MAIN collection filtered by sellerId (reliable source)
+        const [sellerSnap, userSnap, productsSnap, allOrdersSnap] = await Promise.all([
+            db.collection("sellers").doc(uid).get(),
+            db.collection("users").doc(uid).get(),
+            db.collection("products").where("sellerId", "==", uid).get(),
+            db.collection("orders").get()
+        ]);
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller profile not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const userData = userSnap.data();
+
+        // Build products array from main collection
+        const products = productsSnap.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+        }));
+
+        // Calculate Stats
+        let totalSales = 0;
+        let newOrdersCount = 0;
+        let pendingOrdersCount = 0;
+        const sellerOrders = [];
+
+        allOrdersSnap.forEach(doc => {
+            const order = doc.data();
+            const sellerItems = order.items?.filter(item => item.sellerId === uid) || [];
+
+            if (sellerItems.length > 0) {
+                const orderSales = sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0);
+                totalSales += orderSales;
+
+                if (order.status === 'Processing') newOrdersCount++;
+                if (order.status === 'Pending') pendingOrdersCount++;
+
+                sellerOrders.push({
+                    id: doc.id,
+                    orderId: order.orderId || doc.id,
+                    customer: order.customerName || "Customer",
+                    items: sellerItems,
+                    total: orderSales,
+                    status: order.status,
+                    date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                });
+            }
+        });
+
+        console.log(`[Dashboard] Seller ${uid}: ${products.length} products found in main collection`);
+
+        return res.status(200).json({
+            success: true,
+            profile: {
+                shopName: sellerData.shopName,
+                name: userData?.name || sellerData.shopName,
+                phone: sellerData.phone,
+                category: sellerData.category,
+                status: sellerData.sellerStatus
+            },
+            stats: {
+                totalSales,
+                totalProducts: products.length,
+                newOrders: newOrdersCount,
+                pendingOrders: pendingOrdersCount
+            },
+            products,
+            orders: sellerOrders
+        });
+    } catch (error) {
+        console.error("DASHBOARD DATA ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch dashboard data" });
+    }
+});
+
+// GET /seller/:uid/orders - Get orders for a seller (Legacy support, but optimized)
+app.get("/seller/:uid/orders", async (req, res) => {
+    try {
+        const { uid } = req.params;
         const allOrdersSnap = await db.collection("orders").get();
         const sellerOrders = [];
 
@@ -904,7 +1372,7 @@ app.get("/seller/:uid/orders", verifyAuth, async (req, res) => {
                     id: doc.id,
                     orderId: order.orderId || doc.id,
                     customer: order.customerName || "Customer",
-                    items: sellerItems, // Only show items relevant to this seller
+                    items: sellerItems,
                     total: sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0),
                     status: order.status,
                     date: safeToDateString(order.createdAt)
@@ -912,16 +1380,10 @@ app.get("/seller/:uid/orders", verifyAuth, async (req, res) => {
             }
         });
 
-        return res.status(200).json({
-            success: true,
-            orders: sellerOrders
-        });
+        return res.status(200).json({ success: true, orders: sellerOrders });
     } catch (error) {
         console.error("SELLER ORDERS ERROR:", error);
-        return res.status(500).json({
-            success: false,
-            message: "Failed to fetch orders"
-        });
+        return res.status(500).json({ success: false, message: "Failed to fetch orders" });
     }
 });
 
@@ -958,7 +1420,51 @@ app.put("/seller/order/:id/status", verifyAuth, async (req, res) => {
     }
 });
 
+// PUT /seller/product/update/:id - Update a product
+app.put("/seller/product/update/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { sellerId, productData } = req.body;
+
+        if (!sellerId || !productData) {
+            return res.status(400).json({ success: false, message: "Missing required update data" });
+        }
+
+        const updatePayload = {
+            ...productData,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        };
+        delete updatePayload.id;
+
+        await db.collection("products").doc(id).update(updatePayload);
+        await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).update(updatePayload);
+
+        return res.status(200).json({
+            success: true,
+            message: "Product updated successfully in all collections"
+        });
+    } catch (error) {
+        console.error("UPDATE PRODUCT ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to update product"
+        });
+    }
+});
+
+app.get("/health", (req, res) => res.status(200).send("OK"));
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+    console.error("🔥 GLOBAL SERVER ERROR:", err);
+    res.status(500).json({
+        success: false,
+        message: "An internal server error occurred.",
+        error: err.message
+    });
+});
+
 const PORT = 5000;
-app.listen(PORT, () => {
-    console.log(`Auth service running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🚀 [BACKEND] Auth service version 2.8 is LIVE on port ${PORT}`);
 });

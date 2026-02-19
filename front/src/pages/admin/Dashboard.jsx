@@ -13,6 +13,7 @@ export default function AdminDashboard() {
     const [sellers, setSellers] = useState([]);
     const [products, setProducts] = useState([]);
     const [orders, setOrders] = useState([]);
+    const [selectedSeller, setSelectedSeller] = useState(null);
 
     // Fetch all data on component mount
     useEffect(() => {
@@ -139,33 +140,67 @@ export default function AdminDashboard() {
             {filteredSellers.length === 0 ? (
                 <div className="glass-card text-center p-8 text-muted">No pending seller approvals found.</div>
             ) : (
-                <div className="glass-card" style={{ padding: 0, overflowX: 'auto' }}>
-                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <div className="glass-card" style={{ padding: 0, overflowX: 'auto', border: '1px solid var(--border)' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: '800px' }}>
                         <thead style={{ background: 'var(--surface)', textAlign: 'left' }}>
-                            <tr>
-                                <th style={{ padding: '1rem' }}>Shop Name</th>
-                                <th>Contact</th>
-                                <th>Category</th>
-                                <th>Joined</th>
-                                <th style={{ padding: '1rem' }}>Actions</th>
+                            <tr style={{ borderBottom: '2px solid var(--border)' }}>
+                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Shop Identity</th>
+                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Category</th>
+                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Contact Info</th>
+                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'center' }}>Verification</th>
+                                <th style={{ padding: '1.25rem 1.5rem', fontWeight: 600, fontSize: '0.85rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', textAlign: 'right' }}>Quick Actions</th>
                             </tr>
                         </thead>
                         <tbody>
                             {filteredSellers.map(s => (
-                                <tr key={s.uid} style={{ borderBottom: '1px solid var(--border)' }}>
-                                    <td style={{ padding: '1rem' }}>
-                                        <strong>{s.shopName}</strong><br />
-                                        <small className="text-muted">{s.address}</small>
+                                <tr
+                                    key={s.uid}
+                                    style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.2s' }}
+                                    onMouseOver={(e) => e.currentTarget.style.background = 'var(--surface)'}
+                                    onMouseOut={(e) => e.currentTarget.style.background = 'transparent'}
+                                >
+                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                        <div className="flex flex-col">
+                                            <span style={{ fontWeight: 700, fontSize: '1rem', color: 'var(--text)' }}>{s.shopName}</span>
+                                            <span className="text-muted" style={{ fontSize: '0.75rem', marginTop: '2px' }}>{s.address?.substring(0, 40)}...</span>
+                                        </div>
                                     </td>
-                                    <td>{s.email}</td>
-                                    <td>{s.category}</td>
-                                    <td>{s.joined}</td>
-                                    <td style={{ padding: '1rem' }}>
-                                        <div className="flex gap-2">
-                                            <button className="btn btn-secondary" onClick={() => handleApproveSeller(s.uid)} title="Approve" style={{ color: 'var(--success)' }}>
+                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                        <span style={{ padding: '4px 10px', background: 'var(--glass)', border: '1px solid var(--border)', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>
+                                            {s.category}
+                                        </span>
+                                    </td>
+                                    <td style={{ padding: '1.25rem 1.5rem' }}>
+                                        <div className="flex flex-col">
+                                            <span style={{ fontWeight: 500, fontSize: '0.9rem' }}>{s.email}</span>
+                                            <span style={{ fontSize: '0.75rem', color: 'var(--primary)' }}>UID: {s.uid?.substring(0, 8)}</span>
+                                        </div>
+                                    </td>
+                                    <td style={{ padding: '1.25rem 1.5rem', textAlign: 'center' }}>
+                                        <button
+                                            className="btn btn-secondary shadow-sm"
+                                            onClick={() => setSelectedSeller(s)}
+                                            style={{ padding: '6px 14px', fontSize: '0.8rem', fontWeight: 700, borderRadius: '8px', gap: '6px' }}
+                                        >
+                                            <Box size={14} /> Review Data
+                                        </button>
+                                    </td>
+                                    <td style={{ padding: '1.25rem 1.5rem', textAlign: 'right' }}>
+                                        <div className="flex gap-3 justify-end">
+                                            <button
+                                                className="btn btn-secondary"
+                                                onClick={() => handleApproveSeller(s.uid)}
+                                                title="Quick Approve"
+                                                style={{ color: 'var(--success)', width: '38px', height: '38px', padding: 0 }}
+                                            >
                                                 <Check size={18} />
                                             </button>
-                                            <button className="btn btn-secondary" onClick={() => handleRejectSeller(s.uid)} title="Reject" style={{ color: 'var(--error)' }}>
+                                            <button
+                                                className="btn btn-secondary"
+                                                onClick={() => handleRejectSeller(s.uid)}
+                                                title="Quick Reject"
+                                                style={{ color: 'var(--error)', width: '38px', height: '38px', padding: 0 }}
+                                            >
                                                 <X size={18} />
                                             </button>
                                         </div>
@@ -391,6 +426,133 @@ export default function AdminDashboard() {
                     </div>
                 )}
             </div>
+            {/* PREMIUM DATA RETRIEVAL MODAL - ORGANIZED (v2.9) */}
+            {selectedSeller && (
+                <div
+                    className="modal-overlay flex items-center justify-center"
+                    style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(10px)', zIndex: 9999, padding: '2rem' }}
+                    onClick={(e) => e.target === e.currentTarget && setSelectedSeller(null)}
+                >
+                    <div className="glass-card animate-fade-in" style={{ padding: 0, overflow: 'hidden', background: 'white', border: '1px solid var(--border)', borderRadius: '1.5rem', boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.25)', width: '100%', maxWidth: '900px', maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}>
+
+                        {/* Header */}
+                        <div style={{ padding: '1.5rem 2rem', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)' }}>
+                            <div>
+                                <h2 style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--text)' }}>Review Seller Application</h2>
+                                <p className="text-muted" style={{ margin: 0 }}>UID: {selectedSeller.uid}</p>
+                            </div>
+                            <button
+                                onClick={() => setSelectedSeller(null)}
+                                className="btn btn-secondary"
+                                style={{ padding: '0.5rem', borderRadius: '50%', width: '40px', height: '40px' }}
+                            >
+                                <X size={20} />
+                            </button>
+                        </div>
+
+                        {/* Scrollable Content Area */}
+                        <div style={{ padding: '2rem', overflowY: 'auto', flex: 1 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1.2fr', gap: '2rem' }}>
+
+                                {/* Left Side: Document Preview */}
+                                <div className="flex flex-col gap-4">
+                                    <div className="flex items-center gap-2 mb-2">
+                                        <CreditCard size={18} className="text-primary" />
+                                        <h4 style={{ margin: 0 }}>Document Proof</h4>
+                                    </div>
+                                    <div style={{ background: '#111', borderRadius: '12px', overflow: 'hidden', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}>
+                                        <img
+                                            src={selectedSeller.aadhaarImageUrl}
+                                            alt="Identity Document"
+                                            style={{ width: '100%', display: 'block' }}
+                                        />
+                                    </div>
+                                    <p className="text-xs text-center text-muted italic">Registered Aadhaar/Identity Card Preview</p>
+                                </div>
+
+                                {/* Right Side: Extracted Details */}
+                                <div className="flex flex-col gap-6">
+
+                                    {/* Personal Info Grid */}
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+                                            <User size={16} className="text-primary" />
+                                            <span style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase' }}>Personal Identity</span>
+                                        </div>
+                                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                                            <div style={{ background: 'var(--surface)', padding: '0.75rem 1rem', borderRadius: '10px' }}>
+                                                <small className="text-muted mb-1 d-block">Full Name</small>
+                                                <p style={{ fontWeight: 700, margin: 0 }}>{selectedSeller.extractedName || selectedSeller.name}</p>
+                                            </div>
+                                            <div style={{ background: 'var(--surface)', padding: '0.75rem 1rem', borderRadius: '10px' }}>
+                                                <small className="text-muted mb-1 d-block">UIDAI Number</small>
+                                                <p style={{ fontWeight: 700, margin: 0, fontFamily: 'monospace', letterSpacing: '0.05em' }}>{selectedSeller.aadhaarNumber || 'Not Extracted'}</p>
+                                            </div>
+                                            <div style={{ background: 'var(--surface)', padding: '0.75rem 1rem', borderRadius: '10px', gridColumn: 'span 2' }}>
+                                                <small className="text-muted mb-1 d-block">Age / Gender</small>
+                                                <p style={{ fontWeight: 700, margin: 0 }}>{selectedSeller.age || 'N/A'} | {selectedSeller.gender || 'N/A'}</p>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Business Info Section */}
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+                                            <Store size={16} className="text-secondary" />
+                                            <span style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase' }}>Store Profile</span>
+                                        </div>
+                                        <div style={{ background: 'var(--surface)', padding: '1rem', borderRadius: '10px' }}>
+                                            <small className="text-muted mb-1 d-block">Store Name</small>
+                                            <p style={{ fontWeight: 800, fontSize: '1.2rem', color: 'var(--primary)', margin: '0 0 0.5rem 0' }}>{selectedSeller.shopName}</p>
+                                            <div className="flex flex-wrap gap-12" style={{ marginTop: '0.5rem' }}>
+                                                <div style={{ minWidth: '140px' }}>
+                                                    <small className="text-muted" style={{ display: 'block', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>Shop Category</small>
+                                                    <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: '1rem' }}>{selectedSeller.category}</span>
+                                                </div>
+                                                <div style={{ minWidth: '140px' }}>
+                                                    <small className="text-muted" style={{ display: 'block', marginBottom: '4px', fontWeight: 600, textTransform: 'uppercase', fontSize: '10px', letterSpacing: '0.05em' }}>Contact Number</small>
+                                                    <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: '1rem' }}>{selectedSeller.email}</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    {/* Critical Info: Address (Moved here from sidebar) */}
+                                    <div className="flex flex-col gap-3">
+                                        <div className="flex items-center gap-2" style={{ borderBottom: '1px solid var(--border)', paddingBottom: '0.5rem' }}>
+                                            <MapPin size={16} className="text-warning" />
+                                            <span style={{ fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase' }}>Verification Address</span>
+                                        </div>
+                                        <div style={{ background: 'hsla(40, 90%, 60%, 0.05)', border: '1px dashed var(--warning)', padding: '1rem', borderRadius: '10px' }}>
+                                            <p style={{ fontSize: '0.9rem', lineHeight: 1.6, margin: 0, color: 'var(--text)' }}>
+                                                {selectedSeller.address || 'Address information not extracted correctly.'}
+                                            </p>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Sticky Footer Actions - PERFECTLY SYMMETRIC */}
+                        <div style={{ padding: '1.5rem 2rem', background: 'var(--surface)', borderTop: '1px solid var(--border)', display: 'flex', gap: '1rem', width: '100%' }}>
+                            <button
+                                className="btn btn-primary"
+                                style={{ flex: '1 1 50%', py: '1rem', fontSize: '1rem', fontWeight: 700, display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px' }}
+                                onClick={() => { handleApproveSeller(selectedSeller.uid); setSelectedSeller(null); }}
+                            >
+                                <Check size={20} /> Approve Seller
+                            </button>
+                            <button
+                                className="btn btn-secondary"
+                                style={{ flex: '1 1 50%', py: '1rem', fontSize: '1rem', fontWeight: 700, color: 'var(--error)', borderColor: 'var(--error)', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '8px', background: 'white' }}
+                                onClick={() => { handleRejectSeller(selectedSeller.uid); setSelectedSeller(null); }}
+                            >
+                                <X size={20} /> Reject Application
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
