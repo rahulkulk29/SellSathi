@@ -64,12 +64,22 @@ export default function Footer() {
                         </ul>
                     </div>
 
+<<<<<<< HEAD
                     {user?.role !== 'SELLER' && (
                         <div style={{ marginTop: '1rem' }}>
                             <Link
                                 to="/seller/register"
                                 className="btn btn-primary"
                                 style={{ display: 'inline-flex' }}
+=======
+                    <div style={{ textAlign: 'right' }}>
+                        <h4>Earn with Us</h4>
+                        <div style={{ marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                            <button
+                                onClick={handleBecomeSellerClick}
+                                className="btn btn-primary"
+                                style={{ cursor: 'pointer', width: '100%' }}
+>>>>>>> lokesh
                             >
                                 Become a Seller
                             </Link>

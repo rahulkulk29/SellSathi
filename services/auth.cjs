@@ -16,6 +16,8 @@ const cors = require("cors");
 const multer = require("multer");
 const cloudinary = require('cloudinary').v2;
 const { Readable } = require("stream");
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
 
 // Environment flags
 const IS_DEV = process.env.NODE_ENV !== 'production';
@@ -33,6 +35,14 @@ cloudinary.config({
     api_secret: CLOUDINARY_SECRET
 });
 console.log(`☁️  Cloudinary configured: cloud_name=${CLOUDINARY_CLOUD}, api_key=${CLOUDINARY_KEY.substring(0, 4)}...`);
+
+// ==========================
+// 💳 RAZORPAY INITIALIZATION
+// ==========================
+const razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID,
+    key_secret: process.env.RAZORPAY_KEY_SECRET,
+});
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { sendEmail, emailTemplates } = require("./emailService");
@@ -2145,7 +2155,144 @@ app.post("/admin/seed-reviews", async (req, res) => {
     }
 });
 
-// Root endpoint - API info
+// ==========================
+// 💳 PAYMENT ENDPOINTS
+// ==========================
+
+// CREATE RAZORPAY ORDER
+app.post("/payment/create-order", async (req, res) => {
+    try {
+
+        const { amount, cartItems, customerInfo } = req.body;
+
+        if (!amount || amount <= 0)
+            return res.status(400).json({ success: false, message: "Valid amount required" });
+
+        if (!cartItems || cartItems.length === 0)
+            return res.status(400).json({ success: false, message: "Cart items required" });
+
+        const options = {
+            amount: Math.round(amount * 100),
+            currency: "INR",
+            receipt: "order_" + Date.now(),
+            notes: {
+                customerName: customerInfo?.firstName || "Customer",
+                itemCount: String(cartItems.length),
+            },
+        };
+
+        const order = await razorpay.orders.create(options);
+
+        res.status(200).json({
+            success: true,
+            order: {
+                id: order.id,
+                amount: order.amount,
+                currency: order.currency,
+            },
+            key_id: process.env.RAZORPAY_KEY_ID,
+        });
+
+    } catch (error) {
+        console.error("CREATE ORDER ERROR:", error);
+        res.status(500).json({ success: false, message: "Order creation failed" });
+    }
+});
+
+// VERIFY PAYMENT
+app.post("/payment/verify", async (req, res) => {
+
+    try {
+
+        const {
+            razorpay_payment_id,
+            razorpay_order_id,
+            razorpay_signature,
+            cartItems,
+            customerInfo,
+            amount,
+            uid,
+        } = req.body;
+
+        if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature)
+            return res.status(400).json({ success: false, message: "Payment details missing" });
+
+        const expectedSignature = crypto
+            .createHmac("sha256", process.env.RAZORPAY_KEY_SECRET)
+            .update(razorpay_order_id + "|" + razorpay_payment_id)
+            .digest("hex");
+
+        if (expectedSignature !== razorpay_signature)
+            return res.status(400).json({ success: false, message: "Invalid payment signature" });
+
+        const orderId = "OD" + Date.now();
+
+        const orderData = {
+            orderId,
+            uid: uid || "guest",
+            customerName: `${customerInfo?.firstName || ""} ${customerInfo?.lastName || ""}`.trim(),
+            shippingAddress: customerInfo?.address || {},
+            items: cartItems || [],
+            total: amount || 0,
+            paymentMethod: "RAZORPAY",
+            paymentId: razorpay_payment_id,
+            razorpayOrderId: razorpay_order_id,
+            status: "Processing",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        await db.collection("orders").doc(orderId).set(orderData);
+
+        res.status(200).json({
+            success: true,
+            message: "Payment verified",
+            orderId,
+        });
+
+    } catch (error) {
+        console.error("VERIFY PAYMENT ERROR:", error);
+        res.status(500).json({ success: false, message: "Payment verification failed" });
+    }
+});
+
+// COD ORDER
+app.post("/payment/cod-order", async (req, res) => {
+
+    try {
+
+        const { cartItems, customerInfo, amount, uid } = req.body;
+
+        if (!cartItems || cartItems.length === 0)
+            return res.status(400).json({ success: false, message: "Cart items required" });
+
+        const orderId = "OD" + Date.now();
+
+        const orderData = {
+            orderId,
+            uid: uid || "guest",
+            customerName: `${customerInfo?.firstName || ""} ${customerInfo?.lastName || ""}`.trim(),
+            shippingAddress: customerInfo?.address || {},
+            items: cartItems || [],
+            total: amount || 0,
+            paymentMethod: "COD",
+            status: "Processing",
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        await db.collection("orders").doc(orderId).set(orderData);
+
+        res.status(200).json({
+            success: true,
+            message: "COD Order placed",
+            orderId,
+        });
+
+    } catch (error) {
+        console.error("COD ORDER ERROR:", error);
+        res.status(500).json({ success: false, message: "COD Order failed" });
+    }
+});
+
 app.get("/", (req, res) => {
     res.status(200).json({
         success: true,

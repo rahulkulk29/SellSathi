@@ -1,9 +1,23 @@
+<<<<<<< HEAD
+=======
+require("dotenv").config();
+>>>>>>> lokesh
 const express = require("express");
 const admin = require("firebase-admin");
 const bodyParser = require("body-parser");
 const cors = require("cors");
+<<<<<<< HEAD
 
 const app = express();
+=======
+const Razorpay = require("razorpay");
+const crypto = require("crypto");
+
+const app = express();
+app.get('/', (req, res) => res.send('Sellsathi Backend is Running!'));
+app.get('/health', (req, res) => res.status(200).send('OK'));
+
+>>>>>>> lokesh
 app.use(cors()); // Enable CORS for all routes
 app.use(bodyParser.json());
 
@@ -12,6 +26,267 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
+<<<<<<< HEAD
+=======
+const orderController = require("./controllers/orderController");
+
+// Razorpay instance - keys must be provided via env vars
+const razorpayKeyId = process.env.RAZORPAY_KEY_ID;
+const razorpayKeySecret = process.env.RAZORPAY_KEY_SECRET;
+
+let razorpay = null;
+if (razorpayKeyId && razorpayKeySecret) {
+    razorpay = new Razorpay({
+        key_id: razorpayKeyId,
+        key_secret: razorpayKeySecret,
+    });
+} else {
+    console.warn("Razorpay keys are not set. Online payments will not work until RAZORPAY_KEY_ID and RAZORPAY_KEY_SECRET are configured.");
+}
+
+// Order Routes
+app.post("/api/orders/place", orderController.placeOrder);
+app.get("/api/user/:uid/orders", orderController.getUserOrders);
+app.get("/api/user/:uid/stats", orderController.getOrderStats);
+app.get("/api/invoice/:orderId", orderController.downloadInvoice);
+
+// ----- Payment Routes (Razorpay + COD) -----
+
+// Create Razorpay order
+app.post("/payment/create-order", async (req, res) => {
+    try {
+        if (!razorpay) {
+            return res.status(500).json({
+                success: false,
+                message: "Payment gateway not configured on server",
+            });
+        }
+
+        const { amount } = req.body;
+
+        if (!amount || amount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid amount for payment",
+            });
+        }
+
+        const options = {
+            amount: Math.round(amount * 100), // Razorpay works in paise
+            currency: "INR",
+            receipt: `rcpt_${Date.now()}`,
+            payment_capture: 1,
+        };
+
+        const order = await razorpay.orders.create(options);
+
+        return res.status(200).json({
+            success: true,
+            order,
+            key_id: razorpayKeyId,
+        });
+    } catch (error) {
+        console.error("RAZORPAY CREATE ORDER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to create payment order",
+        });
+    }
+});
+
+// Verify Razorpay signature and create order in Firestore
+app.post("/payment/verify", async (req, res) => {
+    try {
+        const {
+            razorpay_payment_id,
+            razorpay_order_id,
+            razorpay_signature,
+            cartItems,
+            customerInfo,
+            amount,
+            uid,
+        } = req.body;
+
+        if (!razorpayKeySecret) {
+            return res.status(500).json({
+                success: false,
+                message: "Payment gateway not configured on server",
+            });
+        }
+
+        if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing payment verification parameters",
+            });
+        }
+
+        const hmac = crypto.createHmac("sha256", razorpayKeySecret);
+        hmac.update(razorpay_order_id + "|" + razorpay_payment_id);
+        const generatedSignature = hmac.digest("hex");
+
+        if (generatedSignature !== razorpay_signature) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid payment signature",
+            });
+        }
+
+        // Build and process order via controller
+        const orderData = {
+            orderId: "OD" + Math.floor(Math.random() * 9000000000 + 1000000000),
+            items: cartItems || [],
+            total: amount || 0,
+            shippingAddress: {
+                firstName: customerInfo?.firstName || "",
+                lastName: customerInfo?.lastName || "",
+                addressLine: customerInfo?.address?.line || "",
+                city: customerInfo?.address?.city || "",
+                pincode: customerInfo?.address?.pincode || "",
+            },
+            email: customerInfo?.email || "",
+            paymentMethod: "online",
+            paymentId: razorpay_payment_id,
+            paymentProvider: "razorpay",
+            status: "Placed",
+            customerName: `${customerInfo?.firstName || ""} ${customerInfo?.lastName || ""}`.trim() || "Customer",
+        };
+
+        const result = await orderController.processOrderInternal(uid, orderData);
+
+        return res.status(200).json({
+            success: true,
+            orderId: result.orderId,
+            paymentId: razorpay_payment_id,
+        });
+    } catch (error) {
+        console.error("RAZORPAY VERIFY ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to verify payment",
+        });
+    }
+});
+
+// COD order route (no Razorpay)
+app.post("/payment/cod-order", async (req, res) => {
+    try {
+        const { cartItems, customerInfo, amount, uid } = req.body;
+
+        if (!cartItems || !Array.isArray(cartItems) || cartItems.length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Cart is empty",
+            });
+        }
+
+        // Build and process order via controller
+        const orderData = {
+            orderId: "OD" + Math.floor(Math.random() * 9000000000 + 1000000000),
+            items: cartItems,
+            total: amount || 0,
+            shippingAddress: {
+                firstName: customerInfo?.firstName || "",
+                lastName: customerInfo?.lastName || "",
+                addressLine: customerInfo?.address?.line || "",
+                city: customerInfo?.address?.city || "",
+                pincode: customerInfo?.address?.pincode || "",
+            },
+            email: customerInfo?.email || "",
+            paymentMethod: "cod",
+            status: "Placed",
+            customerName: `${customerInfo?.firstName || ""} ${customerInfo?.lastName || ""}`.trim() || "Customer",
+        };
+
+        const result = await orderController.processOrderInternal(uid, orderData);
+
+        return res.status(200).json({
+            success: true,
+            orderId: result.orderId,
+        });
+    } catch (error) {
+        console.error("COD ORDER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to place COD order",
+        });
+    }
+});
+
+app.get("/api/orders/:orderId", async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const snapshot = await db.collection("orders").doc(orderId).get();
+        if (!snapshot.exists) {
+            // Try searching by custom orderId field if doc ID doesn't match
+            const query = await db.collection("orders").where("orderId", "==", orderId).get();
+            if (query.empty) return res.status(404).json({ success: false, message: "Order not found" });
+            return res.status(200).json({ success: true, order: { id: query.docs[0].id, ...query.docs[0].data() } });
+        }
+        return res.status(200).json({ success: true, order: { id: snapshot.id, ...snapshot.data() } });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to fetch order" });
+    }
+});
+
+// Wishlist Endpoints
+app.get("/api/user/:uid/wishlist", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const snapshot = await db.collection("users").doc(uid).collection("wishlist").get();
+        const wishlist = [];
+        snapshot.forEach(doc => wishlist.push({ id: doc.id, ...doc.data() }));
+        return res.status(200).json({ success: true, wishlist });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to fetch wishlist" });
+    }
+});
+
+app.post("/api/user/:uid/wishlist/add", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { product } = req.body;
+        await db.collection("users").doc(uid).collection("wishlist").doc(product.id).set(product);
+        return res.status(200).json({ success: true, message: "Added to wishlist" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to add to wishlist" });
+    }
+});
+
+app.delete("/api/user/:uid/wishlist/:productId", async (req, res) => {
+    try {
+        const { uid, productId } = req.params;
+        await db.collection("users").doc(uid).collection("wishlist").doc(productId).delete();
+        return res.status(200).json({ success: true, message: "Removed from wishlist" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to remove from wishlist" });
+    }
+});
+
+// Profile & Address Endpoints
+app.post("/api/user/:uid/profile/update", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { profileData } = req.body;
+        await db.collection("users").doc(uid).update(profileData);
+        return res.status(200).json({ success: true, message: "Profile updated" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to update profile" });
+    }
+});
+
+app.post("/api/user/:uid/address/update", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { address } = req.body;
+        await db.collection("users").doc(uid).update({ savedAddress: address });
+        return res.status(200).json({ success: true, message: "Address updated" });
+    } catch (error) {
+        return res.status(500).json({ success: false, message: "Failed to update address" });
+    }
+});
+
+>>>>>>> lokesh
 
 // TEST CREDENTIALS - For development/testing purposes only
 const TEST_CREDENTIALS = {
@@ -23,6 +298,7 @@ const TEST_CREDENTIALS = {
 
 app.post("/auth/login", async (req, res) => {
     try {
+<<<<<<< HEAD
         const { idToken, isTest, email: testEmail } = req.body;
 
         let uid;
@@ -50,6 +326,21 @@ app.post("/auth/login", async (req, res) => {
             fullName = decodedToken.name || null;
         }
 
+=======
+        const { idToken } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({
+                success: false,
+                message: "ID token is required",
+            });
+        }
+
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const uid = decodedToken.uid;
+        const phoneNumber = decodedToken.phone_number || null;
+
+>>>>>>> lokesh
 
         const userRef = db.collection("users").doc(uid);
         const userSnap = await userRef.get();
@@ -58,8 +349,11 @@ app.post("/auth/login", async (req, res) => {
             await userRef.set({
                 uid,
                 phone: phoneNumber,
+<<<<<<< HEAD
                 email,
                 fullName,
+=======
+>>>>>>> lokesh
                 role: "CONSUMER",
                 isActive: true,
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -69,7 +363,10 @@ app.post("/auth/login", async (req, res) => {
                 success: true,
                 uid,
                 role: "CONSUMER",
+<<<<<<< HEAD
                 fullName,
+=======
+>>>>>>> lokesh
                 status: "NEW_USER",
                 message: "New user created as CONSUMER",
             });
@@ -174,6 +471,7 @@ app.post("/auth/login", async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
 app.post("/auth/register", async (req, res) => {
     try {
         const { idToken, phone, fullName, email, password, isTest, otp } = req.body;
@@ -237,6 +535,8 @@ app.post("/auth/register", async (req, res) => {
         return res.status(500).json({ success: false, message: "Registration failed: " + error.message });
     }
 });
+=======
+>>>>>>> lokesh
 
 // Endpoint for seller application
 app.post("/auth/apply-seller", async (req, res) => {
@@ -444,6 +744,7 @@ app.post("/auth/test-login", async (req, res) => {
 // GET /admin/stats - Dashboard statistics
 app.get("/admin/stats", async (req, res) => {
     try {
+<<<<<<< HEAD
         const usersSnap = await db.collection("users").get();
         const sellersSnap = await db.collection("sellers").get();
         const productsSnap = await db.collection("products").get();
@@ -453,13 +754,34 @@ app.get("/admin/stats", async (req, res) => {
         const pendingSellers = sellersSnap.docs.filter(doc => doc.data().sellerStatus === "PENDING").length;
         const totalProducts = productsSnap.size;
         const totalOrders = ordersSnap.size;
+=======
+        const sellersSnap = await db.collection("sellers").get();
+        const productsSnap = await db.collection("products").get();
+
+        // Calculate real Daily Orders (last 24 hours)
+        const yesterday = new Date();
+        yesterday.setHours(yesterday.getHours() - 24);
+
+        const recentOrdersSnap = await db.collection("orders")
+            .where("createdAt", ">=", yesterday)
+            .get();
+
+        const totalSellers = sellersSnap.size;
+        const pendingSellers = sellersSnap.docs.filter(doc => doc.data().sellerStatus === "PENDING").length;
+        const totalProducts = productsSnap.size;
+        const todayOrders = recentOrdersSnap.size;
+>>>>>>> lokesh
 
         return res.status(200).json({
             success: true,
             stats: {
                 totalSellers,
                 totalProducts,
+<<<<<<< HEAD
                 todayOrders: Math.floor(totalOrders * 0.3), // Estimate
+=======
+                todayOrders,
+>>>>>>> lokesh
                 pendingApprovals: pendingSellers
             }
         });
@@ -472,10 +794,17 @@ app.get("/admin/stats", async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
 // GET /admin/sellers - Pending sellers for approval
 app.get("/admin/sellers", async (req, res) => {
     try {
         const sellersSnap = await db.collection("sellers").where("sellerStatus", "==", "PENDING").get();
+=======
+// GET /admin/sellers - All sellers
+app.get("/admin/sellers", async (req, res) => {
+    try {
+        const sellersSnap = await db.collection("sellers").get();
+>>>>>>> lokesh
 
         const sellers = [];
         for (const doc of sellersSnap.docs) {
@@ -485,6 +814,7 @@ app.get("/admin/sellers", async (req, res) => {
 
             sellers.push({
                 uid: doc.id,
+<<<<<<< HEAD
                 name: sellerData.shopName,
                 email: userData?.phone || "N/A",
                 type: "Individual",
@@ -493,6 +823,16 @@ app.get("/admin/sellers", async (req, res) => {
                 shopName: sellerData.shopName,
                 category: sellerData.category,
                 address: sellerData.address
+=======
+                name: sellerData.shopName || "Unnamed Shop",
+                email: userData?.phone || userData?.email || "N/A",
+                type: "Individual",
+                status: sellerData.sellerStatus || "PENDING",
+                joined: sellerData.appliedAt?.toDate ? sellerData.appliedAt.toDate().toISOString().split('T')[0] : new Date().toISOString().split('T')[0],
+                shopName: sellerData.shopName || "Unnamed Shop",
+                category: sellerData.category || "General",
+                address: sellerData.address || "No Address Provided"
+>>>>>>> lokesh
             });
         }
 
@@ -517,6 +857,7 @@ app.get("/admin/products", async (req, res) => {
         const products = [];
         for (const doc of productsSnap.docs) {
             const productData = doc.data();
+<<<<<<< HEAD
             const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
             const sellerData = sellerSnap.data();
 
@@ -527,6 +868,19 @@ app.get("/admin/products", async (req, res) => {
                 price: productData.price,
                 category: productData.category,
                 status: productData.status || "Active"
+=======
+            const sellerSnap = productData.sellerId ? await db.collection("users").doc(productData.sellerId).get() : null;
+            const sellerData = sellerSnap?.exists ? sellerSnap.data() : null;
+
+            products.push({
+                id: doc.id,
+                title: productData.title || "Untitled Product",
+                seller: sellerData?.phone || sellerData?.email || "Unknown Seller",
+                price: productData.price || 0,
+                category: productData.category || "General",
+                status: productData.status || "Active",
+                imageUrl: productData.imageUrl || "https://via.placeholder.com/150"
+>>>>>>> lokesh
             });
         }
 
@@ -574,6 +928,30 @@ app.get("/admin/orders", async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
+=======
+// GET /admin/orders/:orderId - Detailed order information
+app.get("/admin/order-details/:orderId", async (req, res) => {
+    try {
+        const { orderId } = req.params;
+        const snapshot = await db.collection("orders").doc(orderId).get();
+
+        if (!snapshot.exists) {
+            // Try searching by custom orderId
+            const query = await db.collection("orders").where("orderId", "==", orderId).get();
+            if (query.empty) return res.status(404).json({ success: false, message: "Order not found" });
+            return res.status(200).json({ success: true, order: query.docs[0].data() });
+        }
+
+        return res.status(200).json({ success: true, order: snapshot.data() });
+    } catch (error) {
+        console.error("GET ORDER DETAILS ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch order details" });
+    }
+});
+
+
+>>>>>>> lokesh
 // POST /admin/seller/:uid/approve - Approve seller
 app.post("/admin/seller/:uid/approve", async (req, res) => {
     try {
@@ -627,6 +1005,90 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
+=======
+// POST /admin/seller/:uid/suspend - Suspend seller
+app.post("/admin/seller/:uid/suspend", async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        const sellerRef = db.collection("sellers").doc(uid);
+        await sellerRef.update({
+            sellerStatus: "SUSPENDED",
+            suspendedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Also disable user account globally for safety
+        const userRef = db.collection("users").doc(uid);
+        await userRef.update({
+            isActive: false
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Seller suspended successfully"
+        });
+    } catch (error) {
+        console.error("SUSPEND SELLER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to suspend seller"
+        });
+    }
+});
+
+// POST /admin/seller/:uid/activate - Reactivate suspended seller
+app.post("/admin/seller/:uid/activate", async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        const sellerRef = db.collection("sellers").doc(uid);
+        await sellerRef.update({
+            sellerStatus: "APPROVED",
+            activatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const userRef = db.collection("users").doc(uid);
+        await userRef.update({
+            isActive: true
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Seller activated successfully"
+        });
+    } catch (error) {
+        console.error("ACTIVATE SELLER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to activate seller"
+        });
+    }
+});
+app.post("/admin/seller/:uid/reject", async (req, res) => {
+    try {
+        const { uid } = req.params;
+
+        const sellerRef = db.collection("sellers").doc(uid);
+        await sellerRef.update({
+            sellerStatus: "REJECTED",
+            rejectedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: "Seller rejected successfully"
+        });
+    } catch (error) {
+        console.error("REJECT SELLER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to reject seller"
+        });
+    }
+});
+
+>>>>>>> lokesh
 // ========== SELLER ENDPOINTS ==========
 
 // GET /seller/:uid/stats - Seller dashboard statistics
@@ -794,7 +1256,80 @@ app.get("/seller/:uid/orders", async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
 const PORT = 5000;
 app.listen(PORT, () => {
     console.log(`Auth service running on port ${PORT}`);
 });
+=======
+// --- WISHLIST ENDPOINTS ---
+
+// POST /api/user/:uid/wishlist/add - Add item to user wishlist
+app.post("/api/user/:uid/wishlist/add", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { product } = req.body;
+
+        if (!product || !product.id) {
+            return res.status(400).json({ success: false, message: "Invalid product data" });
+        }
+
+        const wishlistRef = db.collection("wishlists").doc(uid);
+        const doc = await wishlistRef.get();
+
+        if (!doc.exists) {
+            await wishlistRef.set({
+                uid,
+                items: [product],
+                updatedAt: new Date()
+            });
+        } else {
+            const currentItems = doc.data().items || [];
+            const alreadyExists = currentItems.some(item => item.id === product.id);
+
+            if (!alreadyExists) {
+                await wishlistRef.update({
+                    items: [...currentItems, product],
+                    updatedAt: new Date()
+                });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Product added to wishlist!"
+        });
+    } catch (error) {
+        console.error("WISHLIST ADD ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to add to wishlist"
+        });
+    }
+});
+
+// GET /api/user/:uid/wishlist - Get user wishlist
+app.get("/api/user/:uid/wishlist", async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const wishlistDoc = await db.collection("wishlists").doc(uid).get();
+
+        if (!wishlistDoc.exists) {
+            return res.status(200).json({ success: true, items: [] });
+        }
+
+        return res.status(200).json({
+            success: true,
+            items: wishlistDoc.data().items || []
+        });
+    } catch (error) {
+        console.error("GET WISHLIST ERROR:", error);
+        return res.status(500).json({ success: false, message: "Failed to fetch wishlist" });
+    }
+});
+
+const PORT = 5000;
+app.listen(PORT, () => {
+    console.log(`Auth service running on port ${PORT}`);
+});
+>>>>>>> lokesh

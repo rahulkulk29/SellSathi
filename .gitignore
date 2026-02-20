@@ -1,7 +1,5 @@
-node_modules/
-.env
-.env.local
 serviceAccountKey.json
+<<<<<<< HEAD
 <<<<<<< HEAD
 *serviceAccountKey*.json
 dist/
@@ -11,3 +9,7 @@ build/
 dist/
 build/
 >>>>>>> 7d016499fef36b986f04789e5323f6a4fda4ee86
+=======
+.env
+node_modules/
+>>>>>>> lokesh

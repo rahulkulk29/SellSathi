@@ -1,17 +1,44 @@
+import {
+    doc,
+    getDoc,
+    setDoc,
+    updateDoc,
+    increment,
+    collection,
+    onSnapshot,
+    deleteDoc,
+    getDocs
+} from 'firebase/firestore';
 
-import { doc, getDoc, setDoc, updateDoc, increment, collection, onSnapshot, deleteDoc } from 'firebase/firestore';
 import { db, auth } from '../config/firebase';
 
+
+// 🟢 ADD TO CART
 export const addToCart = async (product) => {
     try {
+
         const user = auth.currentUser;
 
         if (!user) {
-            // If not logged in, maybe dispatch an event or return error
-            // User requested "backend" functionality, which implies logged in state.
-            // We can return a specific code to prompt login.
-            console.log("User not logged in");
-            return { success: false, message: "Please login to add items to cart" };
+
+            const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
+            const existingItemIndex = localCart.findIndex(item => item.productId === product.id);
+
+            if (existingItemIndex > -1) {
+                localCart[existingItemIndex].quantity += 1;
+            } else {
+                localCart.push({
+                    productId: product.id,
+                    name: product.name,
+                    price: product.price,
+                    imageUrl: product.imageUrl,
+                    quantity: 1,
+                    category: product.category
+                });
+            }
+
+            localStorage.setItem('tempCart', JSON.stringify(localCart));
+            return { success: true };
         }
 
         const cartItemRef = doc(db, "users", user.uid, "cart", product.id);
@@ -32,76 +59,79 @@ export const addToCart = async (product) => {
             });
         }
 
-        return { success: true, message: "Added to cart successfully" };
+        return { success: true };
+
     } catch (error) {
+
         console.error("Error adding to cart:", error);
 
-        // Fallback for permission errors or network issues - Store in LocalStorage so the user sees it vanish into a cart
-        if (error.code === 'permission-denied' || error.message.includes('Missing or insufficient permissions')) {
-            console.warn("Falling back to LocalStorage cart due to permissions.");
-            try {
-                // Get existing cart
-                const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
-                const existingItemIndex = localCart.findIndex(item => item.productId === product.id);
+        const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
+        const existingItemIndex = localCart.findIndex(item => item.productId === product.id);
 
-                if (existingItemIndex > -1) {
-                    localCart[existingItemIndex].quantity += 1;
-                } else {
-                    localCart.push({
-                        productId: product.id,
-                        name: product.name,
-                        price: product.price,
-                        imageUrl: product.imageUrl,
-                        quantity: 1,
-                        category: product.category
-                    });
-                }
-                localStorage.setItem('tempCart', JSON.stringify(localCart));
-                return { success: true, message: "Added to cart (Local Mode)" };
-            } catch (localError) {
-                console.error("Local cart fallback failed:", localError);
-                return { success: false, message: "Failed to add to cart: " + error.message };
-            }
+        if (existingItemIndex > -1) {
+            localCart[existingItemIndex].quantity += 1;
+        } else {
+            localCart.push({
+                productId: product.id,
+                name: product.name,
+                price: product.price,
+                imageUrl: product.imageUrl,
+                quantity: 1,
+                category: product.category
+            });
         }
 
-        return { success: false, message: "Failed to add to cart: " + error.message };
+        localStorage.setItem('tempCart', JSON.stringify(localCart));
+
+        return { success: true };
     }
 };
 
 
 
+// 🔵 LISTEN TO CART REAL-TIME
 export const listenToCart = (callback) => {
+
     const user = auth.currentUser;
+
     if (!user) {
-        // Fallback to local storage if not logged in
         const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
         callback(localCart);
         return () => { };
     }
 
     const q = collection(db, "users", user.uid, "cart");
+
     const unsubscribe = onSnapshot(q, (querySnapshot) => {
+
         const items = [];
-        querySnapshot.forEach((doc) => {
-            items.push({ id: doc.id, ...doc.data() });
+
+        querySnapshot.forEach((docItem) => {
+            items.push({ id: docItem.id, ...docItem.data() });
         });
+
         callback(items);
+
     }, (error) => {
+
         console.error("Error listening to cart:", error);
-        // If permission error, maybe fallback to local?
-        if (error.code === 'permission-denied') {
-            const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
-            callback(localCart);
-        }
+
+        const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
+        callback(localCart);
     });
 
     return unsubscribe;
 };
 
+
+
+// 🔴 REMOVE FROM CART
 export const removeFromCart = async (productId) => {
+
     const user = auth.currentUser;
+
     if (!user) {
-        // Remove from local storage
+
         const localCart = JSON.parse(localStorage.getItem('tempCart') || '[]');
         const updatedCart = localCart.filter(item => item.productId !== productId);
         localStorage.setItem('tempCart', JSON.stringify(updatedCart));
@@ -109,10 +139,47 @@ export const removeFromCart = async (productId) => {
     }
 
     try {
+
         await deleteDoc(doc(db, "users", user.uid, "cart", productId));
         return { success: true };
+
     } catch (error) {
+
         console.error("Error removing from cart:", error);
-        return { success: false, message: error.message };
+        return { success: false };
+    }
+};
+
+
+
+// 🟡 CLEAR FULL CART (after COD / Razorpay success)
+export const clearCart = async () => {
+
+    const user = auth.currentUser;
+
+    if (!user) {
+        localStorage.removeItem('tempCart');
+        return;
+    }
+
+    try {
+
+        const cartCollectionRef = collection(db, "users", user.uid, "cart");
+
+        const snapshot = await getDocs(cartCollectionRef);
+
+        const deletePromises = [];
+
+        snapshot.forEach((docItem) => {
+            deletePromises.push(
+                deleteDoc(doc(db, "users", user.uid, "cart", docItem.id))
+            );
+        });
+
+        await Promise.all(deletePromises);
+
+    } catch (error) {
+
+        console.error("Error clearing cart:", error);
     }
 };
