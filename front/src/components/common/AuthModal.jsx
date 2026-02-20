@@ -7,9 +7,7 @@ import { useNavigate } from 'react-router-dom';
 
 const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
-    '+919876543210': { otp: '123456', role: 'CONSUMER' }, // Test consumer number
-    '+917676879059': { otp: '123456', role: 'CONSUMER' }, // Real phone - Test as consumer
-    // Add more test numbers here as needed
+    '+919353469036': { otp: '741852', role: 'SELLER' },
 };
 
 export default function AuthModal({ isOpen, onClose, onSuccess, mode = 'consumer' }) {

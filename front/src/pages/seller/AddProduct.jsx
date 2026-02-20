@@ -17,6 +17,7 @@ import {
     Loader
 } from 'lucide-react';
 import { auth } from '../../config/firebase';
+import { authFetch } from '../../utils/api';
 
 export default function AddProduct() {
     const navigate = useNavigate();
@@ -41,18 +42,28 @@ export default function AddProduct() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         const user = auth.currentUser;
-        if (!user) {
+        let sellerId = user?.uid || null;
+
+        if (!sellerId) {
+            try {
+                const userData = JSON.parse(localStorage.getItem('user'));
+                sellerId = userData?.uid || null;
+            } catch {
+                sellerId = null;
+            }
+        }
+
+        if (!sellerId) {
             alert("Please login first");
             return;
         }
 
         setLoading(true);
         try {
-            const response = await fetch('http://localhost:5000/seller/product/add', {
+            const response = await authFetch('/seller/product/add', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    sellerId: user.uid,
+                    sellerId,
                     productData: {
                         ...product,
                         price: parseFloat(product.price),

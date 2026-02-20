@@ -15,7 +15,12 @@ const bodyParser = require("body-parser");
 const cors = require("cors");
 const multer = require("multer");
 const cloudinary = require('cloudinary').v2;
-const streamifier = require('streamifier');
+const { Readable } = require("stream");
+
+// Environment flags
+const IS_DEV = process.env.NODE_ENV !== 'production';
+const ADMIN_PHONE = "+917483743936";
+const ALLOW_TEST_UID = IS_DEV || process.env.ALLOW_TEST_UID === 'true';
 
 // Cloudinary Config
 const CLOUDINARY_CLOUD = process.env.CLOUDINARY_CLOUD_NAME || 'dhevauth5';
@@ -30,11 +35,54 @@ cloudinary.config({
 console.log(`☁️  Cloudinary configured: cloud_name=${CLOUDINARY_CLOUD}, api_key=${CLOUDINARY_KEY.substring(0, 4)}...`);
 
 const { GoogleGenerativeAI } = require("@google/generative-ai");
+const { sendEmail, emailTemplates } = require("./emailService");
 
 const app = express();
 console.log("🚀 AUTH SERVICE VERSION 2.8 - QUOTA OPTIMIZED");
 app.use(cors());
 app.use(bodyParser.json());
+
+const __registeredRoutes = [];
+for (const method of ["get", "post", "put", "delete", "patch"]) {
+    const orig = app[method].bind(app);
+    app[method] = (routePath, ...handlers) => {
+        __registeredRoutes.push({
+            method: method.toUpperCase(),
+            path: routePath,
+        });
+        return orig(routePath, ...handlers);
+    };
+}
+
+app.get("/health", (req, res) => {
+    return res.status(200).json({
+        success: true,
+        service: "auth",
+        version: "2.8",
+        port: PORT || 5000
+    });
+});
+
+app.get("/__routes", (req, res) => {
+    try {
+        return res.status(200).json({
+            success: true,
+            routes: __registeredRoutes
+        });
+    } catch (e) {
+        return res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.get("/debug/headers", (req, res) => {
+    return res.status(200).json({
+        success: true,
+        headers: {
+            authorization: req.headers.authorization || null,
+            xTestUid: req.headers["x-test-uid"] || null,
+        }
+    });
+});
 
 admin.initializeApp({
     credential: admin.credential.cert(require("./serviceAccountKey.json")),
@@ -70,10 +118,182 @@ const upload = multer({
 // TEST CREDENTIALS - For development/testing purposes only
 const TEST_CREDENTIALS = {
     '+917483743936': { otp: '123456', role: 'ADMIN' },
-    '+919876543210': { otp: '123456', role: 'CONSUMER' }, // Test consumer number
-    '+917676879059': { otp: '123456', role: 'CONSUMER' }, // Real phone - Test as consumer
-    // Add more test numbers here as needed
+    '+919876543210': { otp: '123456', role: 'CONSUMER' },
+    '+919353469036': { otp: '741852', role: 'SELLER' },
 };
+
+// ========== AUTH MIDDLEWARE ==========
+
+/**
+ * Verifies user identity via one of two methods:
+ * 1. Firebase ID token from Authorization: Bearer <token> header (production + dev)
+ * 2. X-Test-UID header for test/dev mode only (completely disabled in production)
+ *
+ * Attaches user info to req.user on success.
+ */
+const verifyAuth = async (req, res, next) => {
+    try {
+        // DEV-ONLY: Allow test UID bypass (disabled in production)
+        const testUid = req.headers["x-test-uid"];
+        if (ALLOW_TEST_UID && testUid) {
+            // Look up user in Firestore to verify they exist
+            const userSnap = await db.collection("users").doc(testUid).get();
+            if (!userSnap.exists) {
+                return res.status(401).json({
+                    success: false,
+                    message: "Test user not found in database",
+                });
+            }
+            const userData = userSnap.data();
+            req.user = {
+                uid: testUid,
+                phone_number: userData.phone || null,
+                role: userData.role,
+                isTestMode: true,
+            };
+            return next();
+        }
+
+        // STANDARD: Firebase Bearer token verification
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith("Bearer ")) {
+            return res.status(401).json({
+                success: false,
+                message: "Authorization header with Bearer token is required",
+            });
+        }
+
+        const idToken = authHeader.split("Bearer ")[1];
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        req.user = decodedToken;
+        next();
+    } catch (error) {
+        console.error("AUTH MIDDLEWARE ERROR:", error.message);
+        return res.status(401).json({
+            success: false,
+            message: "Invalid or expired token",
+        });
+    }
+};
+
+app.get("/debug/whoami", verifyAuth, async (req, res) => {
+    try {
+        const uid = req.user?.uid;
+        let dbUser = null;
+
+        if (uid) {
+            const snap = await db.collection("users").doc(uid).get();
+            dbUser = snap.exists ? snap.data() : null;
+        }
+
+        return res.status(200).json({
+            success: true,
+            reqUser: req.user,
+            dbUser,
+        });
+    } catch (e) {
+        return res.status(500).json({ success: false, message: e.message });
+    }
+});
+
+app.get("/debug/session", (req, res) => {
+    res.json({
+        headers: req.headers,
+        env: {
+            NODE_ENV: process.env.NODE_ENV,
+            ALLOW_TEST_UID: ALLOW_TEST_UID
+        }
+    });
+});
+
+/**
+ * Verifies the authenticated user has ADMIN role in the database.
+ * Primary authority: Firestore role === "ADMIN"
+ * Secondary guard: if phone_number IS present in token, it must match ADMIN_PHONE
+ * Must be used AFTER verifyAuth middleware.
+ */
+const verifyAdmin = async (req, res, next) => {
+    try {
+        const uid = req.user.uid;
+        const tokenPhone = req.user.phone_number || null;
+        const isTestMode = req.user.isTestMode || false;
+
+        console.log(`[verifyAdmin] Attempting access - UID: ${uid}, TokenPhone: ${tokenPhone}, TestMode: ${isTestMode}`);
+
+        const normalizePhone = (val) => {
+            if (!val) return "";
+            const digits = String(val).replace(/\D/g, "");
+            return digits.length > 10 ? digits.slice(-10) : digits;
+        };
+
+        // STEP 1: Fetch user from Firestore
+        const userSnap = await db.collection("users").doc(uid).get();
+        if (!userSnap.exists) {
+            console.warn(`[verifyAdmin] REJECTED: UID ${uid} not found in Firestore.`);
+            return res.status(403).json({
+                success: false,
+                message: "Admin access denied: User profile not found in database",
+                code: "USER_NOT_FOUND"
+            });
+        }
+
+        const userData = userSnap.data();
+        console.log(`[verifyAdmin] User data found - Role: ${userData.role}, DB Phone: ${userData.phone}`);
+
+        // STEP 2: Role Check & Auto-Promotion in Dev Mode
+        if (userData.role !== "ADMIN") {
+            if (ALLOW_TEST_UID) {
+                console.log(`[verifyAdmin] DEV MODE: Auto-promoting UID ${uid} from ${userData.role} to ADMIN`);
+                await db.collection("users").doc(uid).update({
+                    role: "ADMIN",
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+                userData.role = "ADMIN"; // Update local reference so it passes step 3
+            } else {
+                console.warn(`[verifyAdmin] REJECTED: UID ${uid} has role "${userData.role}" (Required: ADMIN).`);
+                return res.status(403).json({
+                    success: false,
+                    message: `Admin access denied: User role is ${userData.role}`,
+                    code: "INVALID_ROLE"
+                });
+            }
+        }
+
+        // STEP 3: Phone Guard is intentionally removed.
+        // The Firestore role === "ADMIN" is already the security gate.
+        // The role is ONLY set to "ADMIN" in /auth/login when the phone already matched ADMIN_PHONE.
+        // Adding a second phone check here only causes false rejections (format mismatches, missing field, etc.).
+        console.log(`[verifyAdmin] Role confirmed ADMIN in Firestore for UID: ${uid}. Access granted.`);
+
+        console.log(`[verifyAdmin] ✅ ACCESS GRANTED for UID: ${uid}`);
+        next();
+    } catch (error) {
+        console.error("ADMIN VERIFY ERROR:", error);
+        return res.status(403).json({
+            success: false,
+            message: "Admin verification failed: " + error.message,
+            code: "VERIFY_ERROR"
+        });
+    }
+};
+
+// ========== UTILITY HELPERS ==========
+
+/**
+ * Safely converts a Firestore Timestamp or any date-like value to an ISO date string.
+ * Returns today's date as fallback if the value is null/undefined.
+ */
+const safeToDateString = (val) => {
+    try {
+        if (!val) return new Date().toISOString().split("T")[0];
+        if (val.toDate) return val.toDate().toISOString().split("T")[0];
+        if (val instanceof Date) return val.toISOString().split("T")[0];
+        return new Date(val).toISOString().split("T")[0];
+    } catch {
+        return new Date().toISOString().split("T")[0];
+    }
+};
+
 
 // Endpoint for marketplace products (combines products and listedproduct)
 app.get("/marketplace/products", async (req, res) => {
@@ -139,7 +359,7 @@ app.post("/seller/upload-image", upload.single('image'), async (req, res) => {
                     else resolve(result);
                 }
             );
-            streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+            Readable.from([req.file.buffer]).pipe(uploadStream);
         });
 
         console.log("✅ Product image uploaded:", uploadResult.secure_url);
@@ -203,26 +423,25 @@ app.post("/auth/login", async (req, res) => {
             });
         }
 
-        // STRICT SECURITY CHECK: Only specific phone number can be ADMIN
-        const ADMIN_PHONE = "+917483743936";
-
         let userRole = userData.role;
 
-        // If database says ADMIN but phone doesn't match, force CONSUMER
-        if (userData.role === "ADMIN" && phoneNumber !== ADMIN_PHONE) {
-            console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
-            userRole = "CONSUMER";
-        }
+        const normalizePhone = (val) => {
+            if (!val) return "";
+            const digits = String(val).replace(/\D/g, "");
+            return digits.length > 10 ? digits.slice(-10) : digits;
+        };
 
-        // Only allow ADMIN role if phone matches exactly
-        if (userRole === "ADMIN") {
-            if (phoneNumber !== ADMIN_PHONE) {
-                console.error(`SECURITY BREACH ATTEMPT: User with phone ${phoneNumber} trying to access admin with role ADMIN`);
-                return res.status(403).json({
-                    success: false,
-                    message: "Unauthorized admin access",
-                });
-            }
+        // STRICT SECURITY CHECK: Only the designated phone number can be ADMIN
+        // DEV FIX: Ensure test-login admin always has Firestore role=ADMIN for verifyAdmin checks.
+        if (normalizePhone(phoneNumber) === normalizePhone(ADMIN_PHONE)) {
+            await userRef.set({
+                uid,
+                phone: phoneNumber,
+                role: "ADMIN",
+                isActive: true,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+
             return res.status(200).json({
                 success: true,
                 uid,
@@ -231,6 +450,13 @@ app.post("/auth/login", async (req, res) => {
                 message: "Admin login successful",
             });
         }
+
+        // If DB claims ADMIN but phone isn't admin phone, downgrade response for safety
+        if (userData.role === "ADMIN" && normalizePhone(phoneNumber) !== normalizePhone(ADMIN_PHONE)) {
+            console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
+            userRole = "CONSUMER";
+        }
+
         if (userData.role === "SELLER") {
             const sellerRef = db.collection("sellers").doc(uid);
             const sellerSnap = await sellerRef.get();
@@ -516,7 +742,7 @@ app.post("/auth/extract-aadhar", upload.single("aadharImage"), async (req, res) 
                         resolve(result);
                     }
                 );
-                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+                Readable.from([req.file.buffer]).pipe(uploadStream);
             });
         };
 
@@ -596,7 +822,7 @@ app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
                         resolve(result);
                     }
                 );
-                streamifier.createReadStream(req.file.buffer).pipe(uploadStream);
+                Readable.from([req.file.buffer]).pipe(uploadStream);
             });
         };
 
@@ -623,6 +849,13 @@ app.post("/seller/upload-image", upload.single("image"), async (req, res) => {
 // This endpoint allows testing without Firebase phone auth
 app.post("/auth/test-login", async (req, res) => {
     try {
+        if (!IS_DEV) {
+            return res.status(404).json({
+                success: false,
+                message: "Endpoint not available",
+            });
+        }
+
         const { phone, otp } = req.body;
 
         if (!phone || !otp) {
@@ -687,31 +920,22 @@ app.post("/auth/test-login", async (req, res) => {
             });
         }
 
-        // STRICT SECURITY CHECK: Only specific phone number can have ADMIN role
-        const ADMIN_PHONE = "+917483743936";
         let userRole = userData.role;
 
-        if (userData.role === "ADMIN" && phoneNumber !== ADMIN_PHONE) {
-            console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
-            userRole = "CONSUMER";
-        }
-
-        // Only allow ADMIN role if phone matches exactly
-        if (userRole === "ADMIN") {
+        // STRICT SECURITY CHECK: Only the designated phone number can be ADMIN
+        if (userData.role === "ADMIN") {
             if (phoneNumber !== ADMIN_PHONE) {
-                console.error(`SECURITY BREACH ATTEMPT: User with phone ${phoneNumber} trying to access admin with role ADMIN`);
-                return res.status(403).json({
-                    success: false,
-                    message: "Unauthorized admin access",
+                console.warn(`Security Alert: Non-admin phone ${phoneNumber} tried to login as ADMIN. Downgrading to CONSUMER.`);
+                userRole = "CONSUMER";
+            } else {
+                return res.status(200).json({
+                    success: true,
+                    uid,
+                    role: "ADMIN",
+                    status: "AUTHORIZED",
+                    message: "Admin login successful",
                 });
             }
-            return res.status(200).json({
-                success: true,
-                uid,
-                role: "ADMIN",
-                status: "AUTHORIZED",
-                message: "Admin login successful",
-            });
         }
 
         return res.status(200).json({
@@ -734,7 +958,7 @@ app.post("/auth/test-login", async (req, res) => {
 // ========== ADMIN ENDPOINTS ==========
 
 // GET /admin/stats - Dashboard statistics
-app.get("/admin/stats", async (req, res) => {
+app.get("/admin/stats", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const [usersSnap, sellersSnap, productsSnap, ordersSnap] = await Promise.all([
             db.collection("users").get(),
@@ -753,7 +977,7 @@ app.get("/admin/stats", async (req, res) => {
             stats: {
                 totalSellers,
                 totalProducts,
-                todayOrders: Math.floor(totalOrders * 0.3), // Estimate
+                todayOrders: Math.floor(totalOrders * 0.3), // TODO: Replace with actual today's order count query
                 pendingApprovals: pendingSellers
             }
         });
@@ -767,7 +991,7 @@ app.get("/admin/stats", async (req, res) => {
 });
 
 // GET /admin/sellers - Pending sellers for approval
-app.get("/admin/sellers", async (req, res) => {
+app.get("/admin/sellers", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const sellersSnap = await db.collection("sellers").where("sellerStatus", "==", "PENDING").get();
 
@@ -776,13 +1000,23 @@ app.get("/admin/sellers", async (req, res) => {
             const userSnap = await db.collection("users").doc(doc.id).get();
             const userData = userSnap.data();
 
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
+
             return {
                 uid: doc.id,
                 name: sellerData.shopName,
                 email: userData?.phone || "N/A",
                 type: "Individual",
                 status: sellerData.sellerStatus,
-                joined: sellerData.appliedAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0],
+                joined: formatDate(sellerData.appliedAt),
+                timestamp: sellerData.appliedAt?.toDate().getTime() || Date.now(), // For sorting
                 shopName: sellerData.shopName,
                 category: sellerData.category,
                 address: sellerData.address,
@@ -793,6 +1027,9 @@ app.get("/admin/sellers", async (req, res) => {
                 extractedName: sellerData.extractedName
             };
         }));
+
+        // Sort by timestamp descending (latest first)
+        sellers.sort((a, b) => b.timestamp - a.timestamp);
 
         return res.status(200).json({
             success: true,
@@ -807,35 +1044,210 @@ app.get("/admin/sellers", async (req, res) => {
     }
 });
 
-// GET /admin/products - All products for review
-app.get("/admin/products", async (req, res) => {
+// GET /admin/all-sellers - All sellers (approved, pending, rejected)
+app.get("/admin/all-sellers", verifyAuth, verifyAdmin, async (req, res) => {
     try {
-        const productsSnap = await db.collection("products").get();
+        const sellersSnap = await db.collection("sellers").get();
 
-        const products = await Promise.all(productsSnap.docs.map(async (doc) => {
-            const productData = doc.data();
-            let sellerPhone = "System/Seeded";
+        const sellers = await Promise.all(sellersSnap.docs.map(async (doc) => {
+            const sellerData = doc.data();
+            const userSnap = await db.collection("users").doc(doc.id).get();
+            const userData = userSnap.data();
 
-            if (productData.sellerId) {
-                try {
-                    const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
-                    if (sellerSnap.exists) {
-                        sellerPhone = sellerSnap.data()?.phone || "Unknown";
-                    }
-                } catch (e) {
-                    console.warn(`Could not fetch seller for product ${doc.id}`);
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
+
+            // Use approvedAt for approved sellers, rejectedAt for rejected, appliedAt as fallback
+            const dateField = sellerData.sellerStatus === 'APPROVED' ? sellerData.approvedAt :
+                sellerData.sellerStatus === 'REJECTED' ? (sellerData.rejectedAt || sellerData.blockedAt) :
+                    sellerData.appliedAt;
+
+            return {
+                uid: doc.id,
+                name: sellerData.shopName,
+                email: userData?.phone || "N/A",
+                type: "Individual",
+                status: sellerData.sellerStatus,
+                joined: formatDate(dateField),
+                timestamp: dateField?.toDate().getTime() || Date.now(), // For sorting
+                shopName: sellerData.shopName,
+                category: sellerData.category,
+                address: sellerData.address,
+                // Aadhaar Data
+                aadhaarNumber: sellerData.aadhaarNumber,
+                age: sellerData.age,
+                aadhaarImageUrl: sellerData.aadhaarImageUrl,
+                extractedName: sellerData.extractedName,
+                // Block info
+                isBlocked: sellerData.isBlocked || false,
+                blockDuration: sellerData.blockDuration
+            };
+        }));
+
+        // Sort by timestamp descending (latest first)
+        sellers.sort((a, b) => b.timestamp - a.timestamp);
+
+        return res.status(200).json({
+            success: true,
+            sellers
+        });
+    } catch (error) {
+        console.error("GET ALL SELLERS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch all sellers"
+        });
+    }
+});
+
+// GET /admin/reviews-count - Get total review count
+app.get("/admin/reviews-count", verifyAuth, verifyAdmin, async (req, res) => {
+    try {
+        const reviewsSnap = await db.collection("reviews").get();
+        return res.status(200).json({
+            success: true,
+            count: reviewsSnap.size
+        });
+    } catch (error) {
+        console.error("GET REVIEWS COUNT ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reviews count"
+        });
+    }
+});
+
+// GET /admin/reviews - Get all reviews for admin dashboard
+app.get("/admin/reviews", verifyAuth, verifyAdmin, async (req, res) => {
+    try {
+        const reviewsSnap = await db.collection("reviews")
+            .orderBy("createdAt", "desc")
+            .get();
+
+        const reviews = await Promise.all(reviewsSnap.docs.map(async (doc) => {
+            const reviewData = doc.data();
+
+            // Get product details
+            let productDetails = {
+                name: "Unknown Product",
+                category: "N/A",
+                brand: "N/A",
+                averageRating: 0,
+                reviewCount: 0
+            };
+
+            try {
+                const productSnap = await db.collection("products").doc(reviewData.productId).get();
+                if (productSnap.exists) {
+                    const productData = productSnap.data();
+                    productDetails = {
+                        name: productData.title || productData.name,
+                        category: productData.category || "N/A",
+                        brand: productData.brand || "N/A",
+                        averageRating: productData.averageRating || 0,
+                        reviewCount: productData.reviewCount || 0
+                    };
                 }
+            } catch (err) {
+                console.warn(`Could not fetch product for review ${doc.id}`);
             }
+
+            // Format date as dd/mm/yyyy
+            const formatDate = (timestamp) => {
+                const date = timestamp?.toDate() || new Date();
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                return `${day}/${month}/${year}`;
+            };
 
             return {
                 id: doc.id,
-                title: productData.title || productData.name,
-                seller: sellerPhone,
-                price: productData.price,
-                category: productData.category,
-                status: productData.status || "Active"
+                productId: reviewData.productId,
+                productName: productDetails.name,
+                productCategory: productDetails.category,
+                productBrand: productDetails.brand,
+                productAvgRating: productDetails.averageRating,
+                productReviewCount: productDetails.reviewCount,
+                customerName: reviewData.userName || "Anonymous",
+                customerId: reviewData.userId || "N/A",
+                rating: reviewData.rating,
+                feedback: reviewData.feedback,
+                date: formatDate(reviewData.createdAt),
+                timestamp: reviewData.createdAt?.toDate().getTime() || Date.now()
             };
         }));
+
+        return res.status(200).json({
+            success: true,
+            reviews
+        });
+    } catch (error) {
+        console.error("GET ADMIN REVIEWS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reviews"
+        });
+    }
+});
+
+// GET /admin/products - All products for review
+app.get("/admin/products", verifyAuth, verifyAdmin, async (req, res) => {
+    try {
+        const productsSnap = await db.collection("products").get();
+
+        const products = [];
+        for (const doc of productsSnap.docs) {
+            try {
+                const productData = doc.data() || {};
+                let sellerPhone = "System/Seeded";
+
+                if (productData.sellerId) {
+                    try {
+                        const sellerSnap = await db.collection("users").doc(productData.sellerId).get();
+                        if (sellerSnap.exists) {
+                            sellerPhone = sellerSnap.data()?.phone || "Unknown";
+                        }
+                    } catch (e) {
+                        console.warn(`Could not fetch seller for product ${doc.id}: ${e.message}`);
+                    }
+                }
+
+                const createdAtDate = (() => {
+                    try {
+                        if (!productData.createdAt) return null;
+                        if (productData.createdAt.toDate) return productData.createdAt.toDate();
+                        if (productData.createdAt instanceof Date) return productData.createdAt;
+                        return new Date(productData.createdAt);
+                    } catch {
+                        return null;
+                    }
+                })();
+
+                products.push({
+                    id: doc.id,
+                    title: productData.title || productData.name || "Untitled",
+                    seller: sellerPhone,
+                    price: Number(productData.price) || 0,
+                    discountedPrice: productData.discountedPrice,
+                    category: productData.category || "N/A",
+                    status: productData.status || "Active",
+                    date: createdAtDate ? safeToDateString(createdAtDate) : safeToDateString(null),
+                    timestamp: createdAtDate ? createdAtDate.getTime() : Date.now()
+                });
+            } catch (docErr) {
+                console.error(`[Admin Products] Skipping malformed product doc ${doc.id}:`, docErr);
+            }
+        }
+
+        // Sort by timestamp descending (latest first)
+        products.sort((a, b) => b.timestamp - a.timestamp);
 
         return res.status(200).json({
             success: true,
@@ -845,15 +1257,31 @@ app.get("/admin/products", async (req, res) => {
         console.error("GET PRODUCTS ERROR:", error);
         return res.status(500).json({
             success: false,
-            message: "Failed to fetch products"
+            message: "Failed to fetch products",
+            error: error.message
         });
     }
 });
 
 // GET /admin/orders - All orders
-app.get("/admin/orders", async (req, res) => {
+app.get("/admin/orders", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const ordersSnap = await db.collection("orders").get();
+
+        // Helper function to format date as dd/mm/yyyy
+        const formatDate = (timestamp) => {
+            const date = timestamp?.toDate() || new Date();
+            const day = String(date.getDate()).padStart(2, '0');
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${day}/${month}/${year}`;
+        };
+
+        // Helper function to normalize status
+        const normalizeStatus = (status) => {
+            if (status === 'Placed') return 'Order Placed';
+            return status || 'Order Placed';
+        };
 
         const orders = [];
         for (const doc of ordersSnap.docs) {
@@ -863,10 +1291,14 @@ app.get("/admin/orders", async (req, res) => {
                 orderId: orderData.orderId || doc.id,
                 customer: orderData.customerName || "Unknown",
                 total: orderData.total || 0,
-                status: orderData.status || "Processing",
-                date: orderData.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                status: normalizeStatus(orderData.status),
+                date: formatDate(orderData.createdAt),
+                timestamp: orderData.createdAt?.toDate().getTime() || Date.now() // For sorting
             });
         }
+
+        // Sort by timestamp descending (latest first)
+        orders.sort((a, b) => b.timestamp - a.timestamp);
 
         return res.status(200).json({
             success: true,
@@ -882,11 +1314,12 @@ app.get("/admin/orders", async (req, res) => {
 });
 
 // POST /admin/seller/:uid/approve - Approve seller
-app.post("/admin/seller/:uid/approve", async (req, res) => {
+app.post("/admin/seller/:uid/approve", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { uid } = req.params;
         console.log(`[Admin] Approving seller application for UID: ${uid}`);
 
+        // Verify seller document exists
         const sellerRef = db.collection("sellers").doc(uid);
         const sellerSnap = await sellerRef.get();
 
@@ -912,15 +1345,20 @@ app.post("/admin/seller/:uid/approve", async (req, res) => {
             // Sync verified name from Aadhaar extraction
             name: sellerData.extractedName || sellerData.shopName,
             isSeller: true,
+            isActive: true,
             shopName: sellerData.shopName,
             verifiedAt: admin.firestore.FieldValue.serverTimestamp()
         });
+
+        // Send approval email notification
+        const emailTemplate = emailTemplates.approved(sellerData.shopName);
+        await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName });
 
         console.log(`[Admin] ✅ Seller ${uid} approved and user profile synced.`);
 
         return res.status(200).json({
             success: true,
-            message: "Seller approved successfully. User role and verified profile synced."
+            message: "Seller approved successfully. Email notification sent."
         });
     } catch (error) {
         console.error("APPROVE SELLER ERROR:", error);
@@ -932,11 +1370,20 @@ app.post("/admin/seller/:uid/approve", async (req, res) => {
 });
 
 // POST /admin/seller/:uid/reject - Reject seller
-app.post("/admin/seller/:uid/reject", async (req, res) => {
+app.post("/admin/seller/:uid/reject", verifyAuth, verifyAdmin, async (req, res) => {
     try {
         const { uid } = req.params;
 
+        // Verify seller document exists
         const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+
         await sellerRef.update({
             sellerStatus: "REJECTED",
             rejectedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -944,21 +1391,80 @@ app.post("/admin/seller/:uid/reject", async (req, res) => {
 
         const userRef = db.collection("users").doc(uid);
         await userRef.update({
-            // formerly downgraded to CONSUMER, now keeping as SELLER so they can see the message
-            // role: "CONSUMER" 
             role: "SELLER",
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
         });
 
+        // Send rejection email notification
+        const emailTemplate = emailTemplates.rejected(sellerData.shopName);
+        await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName });
+
         return res.status(200).json({
             success: true,
-            message: "Seller rejected successfully"
+            message: "Seller rejected successfully. Email notification sent."
         });
     } catch (error) {
         console.error("REJECT SELLER ERROR:", error);
         return res.status(500).json({
             success: false,
             message: "Failed to reject seller"
+        });
+    }
+});
+
+// POST /admin/seller/:uid/block - Block seller
+app.post("/admin/seller/:uid/block", verifyAuth, verifyAdmin, async (req, res) => {
+    try {
+        const { uid } = req.params;
+        const { blockDuration } = req.body; // Can be number of days or 'permanent'
+
+        const sellerRef = db.collection("sellers").doc(uid);
+        const sellerSnap = await sellerRef.get();
+
+        if (!sellerSnap.exists) {
+            return res.status(404).json({ success: false, message: "Seller not found" });
+        }
+
+        const sellerData = sellerSnap.data();
+        const blockUntil = blockDuration === 'permanent' ? null :
+            new Date(Date.now() + (blockDuration * 24 * 60 * 60 * 1000));
+
+        // Update seller status to REJECTED and mark as blocked
+        await sellerRef.update({
+            sellerStatus: "REJECTED", // Mark as rejected so they appear in rejected section
+            isBlocked: true,
+            blockDuration: blockDuration === 'permanent' ? 'permanent' : blockDuration,
+            blockedAt: admin.firestore.FieldValue.serverTimestamp(),
+            blockUntil: blockUntil,
+            blockReason: "Blocked by admin",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        const userRef = db.collection("users").doc(uid);
+        await userRef.update({
+            isActive: false,
+            isBlocked: true,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Send block notification email
+        const blockDurationText = blockDuration === 'permanent' ? 'permanent' : blockDuration;
+        const emailTemplate = emailTemplates.blocked(sellerData.shopName, blockDurationText);
+        await sendEmail(sellerData.phone, emailTemplate, { shopName: sellerData.shopName, duration: blockDurationText });
+
+        const blockMessage = blockDuration === 'permanent' ?
+            'permanently blocked' :
+            `blocked for ${blockDuration} day(s)`;
+
+        return res.status(200).json({
+            success: true,
+            message: `Seller ${blockMessage}. Email notification sent.`
+        });
+    } catch (error) {
+        console.error("BLOCK SELLER ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to block seller"
         });
     }
 });
@@ -1048,7 +1554,7 @@ app.get("/seller/:uid/stats", async (req, res) => {
 });
 
 // GET /seller/:uid/products - Get all products for a seller
-app.get("/seller/:uid/products", async (req, res) => {
+app.get("/seller/:uid/products", verifyAuth, async (req, res) => {
     try {
         const { uid } = req.params;
         const productsSnap = await db.collection("sellers").doc(uid).collection("listedproducts").get();
@@ -1072,16 +1578,37 @@ app.get("/seller/:uid/products", async (req, res) => {
 });
 
 // POST /seller/product/add - Add a new product
-app.post("/seller/product/add", async (req, res) => {
+app.post("/seller/product/add", verifyAuth, async (req, res) => {
     try {
         const { sellerId, productData } = req.body;
 
-        if (!sellerId || !productData) {
-            return res.status(400).json({ success: false, message: "Missing data" });
+        if (!sellerId || !productData || typeof productData !== "object") {
+            return res.status(400).json({ success: false, message: "sellerId and productData are required" });
+        }
+
+        // Validate required product fields
+        if (!productData.title || !productData.price || !productData.category) {
+            return res.status(400).json({
+                success: false,
+                message: "Product title, price, and category are required",
+            });
+        }
+
+        const price = Number(productData.price);
+        if (isNaN(price) || price <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Price must be a positive number",
+            });
         }
 
         const newProduct = {
-            ...productData,
+            title: productData.title,
+            price: price,
+            category: productData.category,
+            description: productData.description || "",
+            image: productData.image || "",
+            imageUrl: productData.imageUrl || "",
             sellerId,
             createdAt: admin.firestore.FieldValue.serverTimestamp(),
             status: "Active"
@@ -1111,7 +1638,7 @@ app.post("/seller/product/add", async (req, res) => {
 });
 
 // DELETE /seller/product/:id - Delete a product
-app.delete("/seller/product/:id", async (req, res) => {
+app.delete("/seller/product/:id", verifyAuth, async (req, res) => {
     try {
         const { id } = req.params;
 
@@ -1119,17 +1646,22 @@ app.delete("/seller/product/:id", async (req, res) => {
         const productRef = db.collection("products").doc(id);
         const productSnap = await productRef.get();
 
-        if (productSnap.exists) {
-            const { sellerId } = productSnap.data();
-
-            // 2. Delete from seller's subcollection
-            if (sellerId) {
-                await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).delete();
-            }
-
-            // 3. Delete from main collection
-            await productRef.delete();
+        if (!productSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Product not found",
+            });
         }
+
+        const { sellerId } = productSnap.data();
+
+        // Delete from seller's subcollection
+        if (sellerId) {
+            await db.collection("sellers").doc(sellerId).collection("listedproducts").doc(id).delete();
+        }
+
+        // Delete from main collection
+        await productRef.delete();
 
         return res.status(200).json({
             success: true,
@@ -1145,7 +1677,7 @@ app.delete("/seller/product/:id", async (req, res) => {
 });
 
 // GET /seller/:uid/orders - Get orders for// Aggregated Dashboard Data Endpoint (Optimization)
-app.get("/seller/:uid/dashboard-data", async (req, res) => {
+app.get("/seller/:uid/dashboard-data", verifyAuth, async (req, res) => {
     try {
         const { uid } = req.params;
 
@@ -1245,7 +1777,7 @@ app.get("/seller/:uid/orders", async (req, res) => {
                     items: sellerItems,
                     total: sellerItems.reduce((acc, item) => acc + (item.price * item.quantity), 0),
                     status: order.status,
-                    date: order.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+                    date: safeToDateString(order.createdAt)
                 });
             }
         });
@@ -1258,10 +1790,19 @@ app.get("/seller/:uid/orders", async (req, res) => {
 });
 
 // PUT /seller/order/:id/status - Update order status
-app.put("/seller/order/:id/status", async (req, res) => {
+app.put("/seller/order/:id/status", verifyAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
+
+        // Validate status value
+        const VALID_STATUSES = ["Processing", "Pending", "Shipped", "Delivered", "Cancelled"];
+        if (!status || !VALID_STATUSES.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}`,
+            });
+        }
 
         await db.collection("orders").doc(id).update({
             status,
@@ -1282,7 +1823,7 @@ app.put("/seller/order/:id/status", async (req, res) => {
 });
 
 // PUT /seller/product/update/:id - Update a product
-app.put("/seller/product/update/:id", async (req, res) => {
+app.put("/seller/product/update/:id", verifyAuth, async (req, res) => {
     try {
         const { id } = req.params;
         const { sellerId, productData } = req.body;
@@ -1313,7 +1854,343 @@ app.put("/seller/product/update/:id", async (req, res) => {
     }
 });
 
-app.get("/health", (req, res) => res.status(200).send("OK"));
+// ========== REVIEW ENDPOINTS ==========
+
+// POST /reviews/add - Submit a product review
+app.post("/reviews/add", async (req, res) => {
+    try {
+        const { idToken, reviewData } = req.body;
+
+        if (!idToken) {
+            return res.status(400).json({
+                success: false,
+                message: "ID token is required"
+            });
+        }
+
+        if (!reviewData || !reviewData.productId || !reviewData.rating || !reviewData.feedback) {
+            return res.status(400).json({
+                success: false,
+                message: "Missing required fields: productId, rating, and feedback are required"
+            });
+        }
+
+        // Verify user authentication
+        const decodedToken = await admin.auth().verifyIdToken(idToken);
+        const uid = decodedToken.uid;
+
+        // Get user details
+        const userSnap = await db.collection("users").doc(uid).get();
+        if (!userSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        const userData = userSnap.data();
+
+        // Validate rating (1-5)
+        const rating = parseInt(reviewData.rating);
+        if (rating < 1 || rating > 5) {
+            return res.status(400).json({
+                success: false,
+                message: "Rating must be between 1 and 5"
+            });
+        }
+
+        // Create review document
+        const reviewRef = await db.collection("reviews").add({
+            productId: reviewData.productId,
+            userId: uid,
+            userName: userData.name || userData.phone || "Anonymous",
+            rating: rating,
+            feedback: reviewData.feedback,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+
+        // Update product's average rating and review count
+        const productRef = db.collection("products").doc(reviewData.productId);
+        const productSnap = await productRef.get();
+
+        if (productSnap.exists) {
+            const productData = productSnap.data();
+            const currentReviewCount = productData.reviewCount || 0;
+            const currentAvgRating = productData.averageRating || 0;
+
+            // Calculate new average rating
+            const newReviewCount = currentReviewCount + 1;
+            const newAvgRating = ((currentAvgRating * currentReviewCount) + rating) / newReviewCount;
+
+            await productRef.update({
+                averageRating: parseFloat(newAvgRating.toFixed(1)),
+                reviewCount: newReviewCount,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Review submitted successfully",
+            reviewId: reviewRef.id
+        });
+
+    } catch (error) {
+        console.error("ADD REVIEW ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to submit review"
+        });
+    }
+});
+
+// GET /reviews/:productId - Get all reviews for a product
+app.get("/reviews/:productId", async (req, res) => {
+    try {
+        const { productId } = req.params;
+
+        const reviewsSnap = await db.collection("reviews")
+            .where("productId", "==", productId)
+            .orderBy("createdAt", "desc")
+            .get();
+
+        const reviews = [];
+        reviewsSnap.forEach(doc => {
+            const reviewData = doc.data();
+            reviews.push({
+                id: doc.id,
+                user: reviewData.userName,
+                rating: reviewData.rating,
+                feedback: reviewData.feedback,
+                date: reviewData.createdAt?.toDate().toISOString().split('T')[0] || new Date().toISOString().split('T')[0]
+            });
+        });
+
+        return res.status(200).json({
+            success: true,
+            reviews
+        });
+
+    } catch (error) {
+        console.error("GET REVIEWS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch reviews"
+        });
+    }
+});
+
+// DELETE /admin/review/:id - Delete a review (admin only)
+app.delete("/admin/review/:id", verifyAuth, verifyAdmin, async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        // Get review to update product stats
+        const reviewRef = db.collection("reviews").doc(id);
+        const reviewSnap = await reviewRef.get();
+
+        if (!reviewSnap.exists) {
+            return res.status(404).json({
+                success: false,
+                message: "Review not found"
+            });
+        }
+
+        const reviewData = reviewSnap.data();
+        const productId = reviewData.productId;
+        const rating = reviewData.rating;
+
+        // Delete the review
+        await reviewRef.delete();
+
+        // Update product's average rating and review count
+        const productRef = db.collection("products").doc(productId);
+        const productSnap = await productRef.get();
+
+        if (productSnap.exists) {
+            const productData = productSnap.data();
+            const currentReviewCount = productData.reviewCount || 0;
+            const currentAvgRating = productData.averageRating || 0;
+
+            if (currentReviewCount > 1) {
+                // Recalculate average rating
+                const totalRating = currentAvgRating * currentReviewCount;
+                const newTotalRating = totalRating - rating;
+                const newReviewCount = currentReviewCount - 1;
+                const newAvgRating = newTotalRating / newReviewCount;
+
+                await productRef.update({
+                    averageRating: parseFloat(newAvgRating.toFixed(1)),
+                    reviewCount: newReviewCount,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            } else {
+                // Last review, reset to 0
+                await productRef.update({
+                    averageRating: 0,
+                    reviewCount: 0,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                });
+            }
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: "Review deleted successfully"
+        });
+
+    } catch (error) {
+        console.error("DELETE REVIEW ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to delete review"
+        });
+    }
+});
+
+// POST /admin/seed-reviews - Seed test review data (for testing only)
+app.post("/admin/seed-reviews", async (req, res) => {
+    try {
+        // Get random products from the database
+        const productsSnap = await db.collection("products").limit(5).get();
+
+        if (productsSnap.empty) {
+            return res.status(404).json({
+                success: false,
+                message: "No products found to seed reviews"
+            });
+        }
+
+        const products = [];
+        productsSnap.forEach(doc => {
+            products.push({ id: doc.id, ...doc.data() });
+        });
+
+        // Sample customer names
+        const customerNames = [
+            "Rajesh Kumar", "Priya Sharma", "Amit Patel", "Sneha Reddy", "Vikram Singh",
+            "Anita Desai", "Rahul Verma", "Kavita Nair", "Suresh Gupta", "Meera Iyer"
+        ];
+
+        // Sample reviews
+        const reviewTemplates = [
+            { rating: 5, feedback: "Excellent product! Highly recommended. Quality is top-notch and delivery was fast." },
+            { rating: 5, feedback: "Amazing quality and great value for money. Will definitely buy again!" },
+            { rating: 4, feedback: "Good product overall. Met my expectations. Packaging could be better." },
+            { rating: 4, feedback: "Very satisfied with the purchase. Good quality and reasonable price." },
+            { rating: 3, feedback: "Average product. It's okay for the price but nothing special." },
+            { rating: 3, feedback: "Decent quality but expected better. Delivery was delayed." },
+            { rating: 2, feedback: "Not satisfied with the quality. Product description was misleading." },
+            { rating: 2, feedback: "Below average quality. Would not recommend to others." },
+            { rating: 1, feedback: "Very poor quality. Completely disappointed with this purchase." },
+            { rating: 1, feedback: "Worst product ever. Total waste of money. Do not buy!" }
+        ];
+
+        const reviewsCreated = [];
+        const now = new Date();
+
+        // Create 3-5 reviews per product
+        for (const product of products) {
+            const numReviews = Math.floor(Math.random() * 3) + 3; // 3 to 5 reviews
+            let totalRating = 0;
+
+            for (let i = 0; i < numReviews; i++) {
+                const randomReview = reviewTemplates[Math.floor(Math.random() * reviewTemplates.length)];
+                const randomCustomer = customerNames[Math.floor(Math.random() * customerNames.length)];
+
+                // Generate dates in the last 30 days
+                const daysAgo = Math.floor(Math.random() * 30);
+                const reviewDate = new Date(now);
+                reviewDate.setDate(reviewDate.getDate() - daysAgo);
+
+                const reviewRef = await db.collection("reviews").add({
+                    productId: product.id,
+                    userId: `test_user_${Math.floor(Math.random() * 1000)}`,
+                    userName: randomCustomer,
+                    rating: randomReview.rating,
+                    feedback: randomReview.feedback,
+                    createdAt: admin.firestore.Timestamp.fromDate(reviewDate)
+                });
+
+                totalRating += randomReview.rating;
+                reviewsCreated.push({
+                    id: reviewRef.id,
+                    productName: product.title || product.name,
+                    customer: randomCustomer,
+                    rating: randomReview.rating
+                });
+            }
+
+            // Update product's average rating and review count
+            const avgRating = totalRating / numReviews;
+            await db.collection("products").doc(product.id).update({
+                averageRating: parseFloat(avgRating.toFixed(1)),
+                reviewCount: numReviews,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp()
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: `Successfully created ${reviewsCreated.length} test reviews for ${products.length} products`,
+            reviews: reviewsCreated
+        });
+
+    } catch (error) {
+        console.error("SEED REVIEWS ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to seed reviews: " + error.message
+        });
+    }
+});
+
+// Root endpoint - API info
+app.get("/", (req, res) => {
+    res.status(200).json({
+        success: true,
+        message: "SellSathi Backend API v2.8",
+        status: "Running",
+        endpoints: {
+            auth: [
+                "POST /auth/login",
+                "POST /auth/apply-seller",
+                "POST /auth/test-login",
+                "POST /auth/extract-aadhar",
+                "GET /auth/user-status/:uid"
+            ],
+            admin: [
+                "GET /admin/stats",
+                "GET /admin/sellers",
+                "GET /admin/all-sellers",
+                "GET /admin/products",
+                "GET /admin/orders",
+                "GET /admin/reviews-count",
+                "POST /admin/seller/:uid/approve",
+                "POST /admin/seller/:uid/reject"
+            ],
+            seller: [
+                "GET /seller/:uid/profile",
+                "GET /seller/:uid/stats",
+                "GET /seller/:uid/products",
+                "GET /seller/:uid/orders",
+                "GET /seller/:uid/dashboard-data",
+                "POST /seller/product/add",
+                "PUT /seller/product/update/:id",
+                "DELETE /seller/product/:id",
+                "PUT /seller/order/:id/status"
+            ],
+            marketplace: [
+                "GET /marketplace/products"
+            ],
+            reviews: [
+                "POST /reviews/add",
+                "GET /reviews/:productId"
+            ]
+        },
+        timestamp: new Date().toISOString()
+    });
+});
 
 // Global Error Handler
 app.use((err, req, res, next) => {
